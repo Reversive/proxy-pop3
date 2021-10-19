@@ -1,6 +1,7 @@
 --- Grupo 1 ---
 
 - Escucha TCP 110
+- En las órdenes y respuestas POP3, los números y tamaños de todos los mensajes se expresan en base 10 (decimal).
 - Cuando la conexión se establece el servidor POP3 envía un saludo
 	- Despues de enviar el servidor POP3 el saludo, la sesión entra en la fase de AUTORIZACIÓN
 - Respuestas
@@ -16,12 +17,27 @@
 		- Si cualquier línea de la respuesta multilínea comienza con el octeto terminal, se antepone el octeto terminal a esa línea en la respuesta.
 - Autorizacion
 	- El cliente debe identificarse ante el servidor POP3
+	- Se describen dos posibles mecanismos para hacer esto:
+		- USER y PASS
+		- orden APOP
+	- Si el buzón no puede abrirse por alguna razón (por ejemplo, la exclusividad no puede adquirirse, al cliente se le ha denegado el acceso, o el buzón no puede ser examinado), el servidor POP3 responde con un indicador de estado
+   negativo
+	- Tras devolver un indicador de estado negativo, el servidor puede cerrar la conexión
+	- Si el servidor no cierra la conexión, el cliente puede elegir tanto enviar una nueva orden de autenticación y empezar de nuevo, como enviar la orden QUIT.
 	- Una vez logeado el servidor adquiere los recursos asociados con el buzón del cliente, y la sesión entra en la fase de TRANSACCIÓN
 
 - Transaccion
 	- El cliente solicita la actuación al servidor POP3
+	- Después de que el servidor POP3 halla abierto el buzón, asigna un número a cada mensaje, y mira el tamaño de cada uno en octetos.
 	- Tras el envío por el cliente de la orden QUIT, la sesión entra en la fase de AUTORIZACIÓN
 		- El servidor POP3 libera cualquier recurso adquirido durante la fase de TRANSACCIÓN, y dice adiós. En ese momento se cierra la conexión TCP.
+
+- Actualizacion
+	- Cuando el cliente envía la orden QUIT en la fase de TRANSACCIÓN, la sesión POP3 entra en la fase de ACTUALIZACIÓN
+	- Si el cliente envía una orden QUIT durante la fase de AUTORIZACIÓN, la sesión POP3 termina pero NO entra en la fase de ACTUALIZACIÓN
+	- Si la sesión termina por cualquier motivo que no sea una orden QUIT enviada por el cliente, la sesión POP3 NO entra en la fase de
+   	actualización y NO DEBE eliminar ningún mensaje del buzón.
+	
 - Ordenes
 	- Ordenes terminan en CRLF
 	- Ordenes y argumentos compuestos de caracteres ASCII imprimibles separados de sus argumentos por un sólo carácter ESPACIO
