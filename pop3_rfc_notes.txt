@@ -1,0 +1,37 @@
+--- Grupo 1 ---
+
+- Escucha TCP 110
+- Cuando la conexión se establece el servidor POP3 envía un saludo
+	- Despues de enviar el servidor POP3 el saludo, la sesión entra en la fase de AUTORIZACIÓN
+- Respuestas
+	- Formada por un indicador de estado y una palabra clave, posiblemente seguida de información adicional.
+	- Todas las respuestas están terminadas por un par CRLF.
+	- Hasta 512 caracteres de longitud, incluyendo el CRLF del final.
+	- Hay dos indicadores de estado: el positivo ("+OK") y el negativo ("-ERR") (Si o si en mayus).
+	- Un servidor DEBE responder a una orden no reconocida, no implementada o no válida sintácticamente, con un indicador de estado negativo
+	- El servidor DEBE responder a una orden enviada en una fase incorrecta con un indicador de estado negativo.
+	- Las respuestas a ciertas órdenes son multilínea
+		- Cada linea termina en CRLF 
+		- Cuando se han enviado todas las líneas de la 	respuesta, se envía una línea final que consiste en un octeto terminal (código decimal 046, ".") y un par CRLF.
+		- Si cualquier línea de la respuesta multilínea comienza con el octeto terminal, se antepone el octeto terminal a esa línea en la respuesta.
+- Autorizacion
+	- El cliente debe identificarse ante el servidor POP3
+	- Una vez logeado el servidor adquiere los recursos asociados con el buzón del cliente, y la sesión entra en la fase de TRANSACCIÓN
+
+- Transaccion
+	- El cliente solicita la actuación al servidor POP3
+	- Tras el envío por el cliente de la orden QUIT, la sesión entra en la fase de AUTORIZACIÓN
+		- El servidor POP3 libera cualquier recurso adquirido durante la fase de TRANSACCIÓN, y dice adiós. En ese momento se cierra la conexión TCP.
+- Ordenes
+	- Ordenes terminan en CRLF
+	- Ordenes y argumentos compuestos de caracteres ASCII imprimibles separados de sus argumentos por un sólo carácter ESPACIO
+	- Las órdenes tiene tres o cuatro caracteres de longitud. 
+	- Cada argumento puede tener hasta 40 caracteres
+	- Case-Insensitive
+
+- Inactividad
+	- Un servidor POP3 PUEDE tener un contador de inactividad para cerrar la conexión
+	- DEBE de ser de al menos 10 minutos de duración
+	- La recepción de cualquier orden durante el intervalo debería bastar para reiniciar el contador
+	- Cuando el contador se agota, la sesión NO entra en fase de ACTUALIZACIÓN: el servidor debería cerrar la conexión TCP sin eliminar ningún mensaje ni enviar ninguna respuesta al cliente.
+		
