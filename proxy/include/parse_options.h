@@ -1,9 +1,9 @@
 #ifndef PARSE_OPTIONS_H
 #define PARSE_OPTIONS_H
-#include <stdio.h> /* para printf */
-#include <stdlib.h> /* para exit */
+#include <stdio.h>
+#include <stdlib.h>
 #define _GNU_SOURCE
-#include <getopt.h> /*para getopt_long*/ 
+#include <getopt.h>
 #include "data_structures.h"
 
 void parse_options( int argc, char *argv[], void * proxy_data, 
