@@ -3,9 +3,8 @@
  *         del selector.c
  */
 #include <stdlib.h>
-#include <stdio.h>
 #include "include/stm.h"
-
+#define error -1
 #define N(x) (sizeof(x)/sizeof((x)[0]))
 
 void stm_init(struct state_machine * stm) {

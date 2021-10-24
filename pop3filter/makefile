@@ -5,7 +5,7 @@ SOURCES = $(wildcard *.c)
 OBJECTS = $(SOURCES:.c=.o)
 rm      = rm -rf
 
-all: utils compile link 
+all: utils compile link
 
 compile:$(SOURCES)
 	$(GCC) $(CFLAGS) -I./include $(SOURCES)
