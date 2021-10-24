@@ -34,9 +34,7 @@ void print_help() {
     exit(STATUS_SUCCESS);
 }
 
-void parse_options( int argc, char *argv[], void * proxy_data, 
-                    void * proxy_admin_data, void * origin_server_data,
-                    proxy_configuration_ptr proxy_config) {
+void parse_options(int argc, char *argv[], proxy_configuration_ptr proxy_config) {
     int option;
     while((option = getopt(argc, argv, "e:hl:L:o:p:P:t:v")) != -1) {
         switch (option) {
@@ -55,8 +53,10 @@ void parse_options( int argc, char *argv[], void * proxy_data,
         case 'o':
             break;
         case 'p':
+            proxy_config->pop3_listen_port = atoi(optarg);
             break;
         case 'P':
+            proxy_config->origin_server_port = atoi(optarg);
             break;
         case 't':
             proxy_config->pop3_filter_command = optarg;

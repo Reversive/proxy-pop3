@@ -13,7 +13,7 @@ sigterm_handler(const int signal) {
 int main(int argc, char *argv[]) {
     unsigned port = 9090;
     proxy_conf = malloc(sizeof(struct proxy_configuration_t));
-    parse_options(argc, argv, NULL, NULL, NULL, proxy_conf);
+    parse_options(argc, argv, proxy_conf);
     close(STDIN);
     const char *error_message   = NULL;
     selector_status status      = SELECTOR_SUCCESS;

@@ -1,5 +1,7 @@
 #include "include/pop3nio.h"
 
+proxy_configuration_ptr proxy_config;
+
 static const unsigned  max_pool  = 50;
 static unsigned        pool_size = 0;
 static struct pop3     *pool     = 0;
@@ -172,6 +174,50 @@ static const struct fd_handler pop3_handler = {
         .handle_block  = pop3_block,
 };
 
+
+// getaddrinfo(const char *hostname, const char *servname, const struct addrinfo *hints, struct addrinfo **res);
+void * blocking_resolve_origin(void * k) {
+	struct selector_key *key = (struct selector_key *)k;
+    struct pop3 *pop3_ptr = ATTACHMENT(key);
+    struct addrinfo addr_criteria;
+    pthread_detach(pthread_self());
+    memset(&addr_criteria, 0, sizeof(addr_criteria));
+    
+    addr_criteria.ai_family      = AF_UNSPEC; //Any addr family
+    addr_criteria.ai_socktype    = SOCK_STREAM; 
+    addr_criteria.ai_protocol    = IPPROTO_TCP;
+
+	char origin_port[7] = {0};
+    if (snprintf(origin_port, sizeof(origin_port), "%hu", proxy_config->origin_server_port) < 0) {
+        fprintf(stderr, "Error parseando puerto");
+    }
+    
+    getaddrinfo(proxy_config->origin_server_address, origin_port, 
+        &addr_criteria, &pop3_ptr->origin_resolution);
+    
+    selector_notify_block(key->s, key->fd);
+    return NULL;
+}
+
+int resolve_origin(struct selector_key *key) {
+    pthread_t tid;
+    pthread_create(&tid, 0, blocking_resolve_origin, key);
+	return 0;
+}
+
+int done_resolving_origin(struct selector_key * key) {
+	return 0;
+}
+
+static const struct state_definition handlers[] = {
+    {
+        .state          = RESOLVE_ORIGIN,
+        .on_write_ready = resolve_origin,
+        .on_block_ready = done_resolving_origin
+    },
+
+};
+
 void pop3_passive_accept(struct selector_key *key) {
     struct sockaddr_storage client_address;
     socklen_t               client_address_len  = sizeof(client_address);
@@ -218,7 +264,7 @@ static struct pop3 * pop3_new(int client_fd) {
 
     pop3->stm.initial           = RESOLVE_ORIGIN;
     pop3->stm.max_state         = ERROR;
-    pop3->stm.states            = NULL; //TODO: Implementar los estados
+    pop3->stm.states            = handlers; //TODO: Implementar los estados
     stm_init(&pop3->stm);
 
     // TODO: Agregar r/w buffers

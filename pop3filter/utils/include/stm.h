@@ -33,7 +33,7 @@ struct state_machine {
     const struct state_definition * current;
 };
 
-struct selector_key * key;
+typedef struct selector_key* key_ptr;
 
 /**
  * Definición de un estado de la máquina de estados
@@ -43,15 +43,15 @@ struct state_definition {
     int state;
 
     // ejecutado al arribar al estado
-    void     (* on_arrival)    (struct selector_key * key);
+    void     (* on_arrival)    (key_ptr);
     // ejecutado al salir del estado
-    void     (* on_departure)  (struct selector_key * key);
+    void     (* on_departure)  (key_ptr);
     // ejecutado cuando hay datos disponibles para ser leidos
-    int      (* on_read_ready) (struct selector_key * key);
+    int      (* on_read_ready) (key_ptr);
     // ejecutado cuando hay datos disponibles para ser escritos
-    int      (* on_write_ready)(struct selector_key * key);
+    int      (* on_write_ready)(key_ptr);
     // ejecutado cuando hay una resolución de nombres lista
-    int      (* on_block_ready)(struct selector_key * key);
+    int      (* on_block_ready)(key_ptr);
 };
 
 
@@ -59,12 +59,12 @@ struct state_definition {
 void stm_init(struct state_machine *);
 
 /* Indica que ocurrió el evento read. retorna nuevo id de nuevo estado. */
-int stm_handler_read(struct state_machine *, struct selector_key *);
+int stm_handler_read(struct state_machine *, key_ptr);
 
 /* Indica que ocurrió el evento write. retorna nuevo id de nuevo estado. */
-int stm_handler_write(struct state_machine *, struct selector_key *);
+int stm_handler_write(struct state_machine *, key_ptr);
 
 /* Indica que ocurrió el evento block. retorna nuevo id de nuevo estado. */
-int stm_handler_block(struct state_machine *, struct selector_key *);
+int stm_handler_block(struct state_machine *, key_ptr);
 
 #endif //PROXY_STM_H

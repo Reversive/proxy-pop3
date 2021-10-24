@@ -24,7 +24,7 @@ void stm_init(struct state_machine * stm) {
     }
 }
 
-inline static void handle_first(struct state_machine * stm, struct selector_key * key) {
+inline static void handle_first(struct state_machine * stm, key_ptr key) {
     if (stm->current == NULL) {
         stm->current = stm->states + stm->initial;
         if (NULL != stm->current->on_arrival) {
@@ -33,7 +33,7 @@ inline static void handle_first(struct state_machine * stm, struct selector_key 
     }
 }
 
-inline static void jump(struct state_machine * stm, int next, struct selector_key * key) {
+inline static void jump(struct state_machine * stm, int next, key_ptr key) {
     if (next > stm->max_state) {
         abort();
     }
@@ -52,7 +52,7 @@ inline static void jump(struct state_machine * stm, int next, struct selector_ke
 
 }
 
-int stm_handler_read(struct state_machine * stm, struct selector_key * key) {
+int stm_handler_read(struct state_machine * stm, key_ptr key) {
     handle_first(stm, key);
 
     if (stm->current->on_read_ready == 0) {
@@ -65,7 +65,7 @@ int stm_handler_read(struct state_machine * stm, struct selector_key * key) {
     return ret;
 }
 
-int stm_handler_write(struct state_machine * stm, struct selector_key * key) {
+int stm_handler_write(struct state_machine * stm, key_ptr key) {
     handle_first(stm, key);
 
     if (stm->current->on_write_ready == 0) {
@@ -78,7 +78,7 @@ int stm_handler_write(struct state_machine * stm, struct selector_key * key) {
     return ret;
 }
 
-int stm_handler_block(struct state_machine * stm, struct selector_key * key) {
+int stm_handler_block(struct state_machine * stm, key_ptr key) {
     handle_first(stm, key);
 
     if(stm->current->on_block_ready == 0) {
