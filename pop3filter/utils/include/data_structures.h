@@ -10,7 +10,6 @@ typedef struct proxy_configuration_t {
 
 } proxy_configuration;
 
-enum STATES {ERROR = -1, SUCCESS = 0};
 typedef int fd;
 typedef proxy_configuration * proxy_configuration_ptr;
 

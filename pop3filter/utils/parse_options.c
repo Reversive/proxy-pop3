@@ -65,7 +65,7 @@ void parse_options( int argc, char *argv[], void * proxy_data,
             print_proxy_version(argc);
             break;
         default:
-            fprintf(stderr, "Invalid options\n");
+            fprintf(stderr, "Invalid options, use -h to print help\n");
             exit(STATUS_ERROR);
             break;
         }

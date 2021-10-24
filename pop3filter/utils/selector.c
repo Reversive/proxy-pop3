@@ -504,7 +504,7 @@ handle_block_notifications(fd_selector s) {
 
 selector_status
 selector_notify_block(fd_selector  s,
-                 const int    fd) {
+                      const int    fd) {
     selector_status ret = SELECTOR_SUCCESS;
 
     // TODO(juan): usar un pool

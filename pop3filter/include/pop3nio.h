@@ -17,5 +17,6 @@
 #include "../utils/include/netutils.h"
 #include "../utils/include/selector.h"
 #include "../utils/include/stm.h"
+#include "../utils/include/data_structures.h"
 #define N(x) (sizeof(x)/sizeof((x)[0]))
 #endif //POP3FILTER_POP3NIO_H

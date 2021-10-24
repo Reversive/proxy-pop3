@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, sigterm_handler);
     signal(SIGINT,  sigterm_handler);
 
-    if(selector_fd_set_nio(server) == ERROR) {
+    if(selector_fd_set_nio(server) == -1) {
         error_message = "Failed setting socket as non-blocking";
         goto finally;
     }
