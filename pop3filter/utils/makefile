@@ -6,11 +6,11 @@ rm       = rm -rf
 
 
 all:$(SOURCES)
-	$(GCC) $(CFLAGS) $(SOURCES)
+	$(GCC) $(CFLAGS) -I./include $(SOURCES)
 
 
 %.o : %.c
-	$(GCC) $(CFLAGS) -I./include -c $< -o $@
+	$(GCC) $(CFLAGS) -c $< -o $@
 
 clean:
 	@$(rm) $(OBJECTS)

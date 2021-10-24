@@ -69,7 +69,7 @@ int main(int argc, char *argv[]) {
     }
 
     const struct fd_handler pop3_handler = {
-            .handle_read    = accept_pop3_connection,
+            .handle_read    = pop3_passive_accept,
             .handle_write   = NULL,
             .handle_close   = NULL,
     };
@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
         goto finally;
     }
 
-    for(;!done;) {
+    while(!done) {
         error_message = NULL;
         status = selector_select(selector);
         if(status != SELECTOR_SUCCESS) {
