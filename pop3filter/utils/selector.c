@@ -160,7 +160,7 @@ struct fdselector {
 };
 
 /** cantidad mÃ¡xima de file descriptors que la plataforma puede manejar */
-#define ITEMS_MAX_SIZE      FD_SETSIZE
+#define ITEMS_MAX_SIZE      1024
 
 // en esta implementaciÃ³n el mÃ¡ximo estÃ¡ dado por el lÃ­mite natural de select(2).
 
@@ -251,6 +251,7 @@ ensure_capacity(fd_selector s, const size_t n) {
         ret = SELECTOR_SUCCESS;
     } else if(n > ITEMS_MAX_SIZE) {
         // me estÃ¡s pidiendo mÃ¡s de lo que se puede.
+        fprintf(stdout, "%d", ITEMS_MAX_SIZE);
         ret = SELECTOR_MAXFD;
     } else if(NULL == s->fds) {
         // primera vez.. alocamos

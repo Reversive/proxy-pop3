@@ -7,6 +7,6 @@
 #define SELECTOR_ELEMENTS 1024
 #define STDIN 0
 
-extern proxy_configuration_ptr proxy_conf;
+
 
 #endif

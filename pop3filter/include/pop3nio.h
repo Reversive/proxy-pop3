@@ -20,5 +20,4 @@
 #define N(x) (sizeof(x)/sizeof((x)[0]))
 
 void pop3_passive_accept(struct selector_key *key);
-extern proxy_configuration_ptr proxy_config;
 #endif //POP3FILTER_POP3NIO_H

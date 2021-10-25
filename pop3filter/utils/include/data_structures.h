@@ -11,9 +11,10 @@ typedef struct proxy_configuration_t {
     char *pop3_filter_command;
     uint16_t origin_server_port;
     uint16_t pop3_listen_port;
+    uint16_t admin_listen_port;
 } proxy_configuration;
 
 typedef int fd;
 typedef proxy_configuration * proxy_configuration_ptr;
-
+extern proxy_configuration_ptr proxy_config;
 #endif

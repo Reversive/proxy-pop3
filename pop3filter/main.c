@@ -1,6 +1,6 @@
 #include "include/main.h"
 
-proxy_configuration_ptr proxy_conf;
+proxy_configuration_ptr proxy_config;
 static bool done = false;
 
 static void
@@ -11,9 +11,7 @@ sigterm_handler(const int signal) {
 
 // TODO: Cambiar fprintf por logging
 int main(int argc, char *argv[]) {
-    unsigned port = 9090;
-    proxy_conf = malloc(sizeof(struct proxy_configuration_t));
-    parse_options(argc, argv, proxy_conf);
+    proxy_config = parse_options(argc, argv);
     close(STDIN);
     const char *error_message   = NULL;
     selector_status status      = SELECTOR_SUCCESS;
@@ -22,14 +20,14 @@ int main(int argc, char *argv[]) {
     memset(&address, 0, sizeof(address));
     address.sin_family      = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_ANY);
-    address.sin_port        = htons(port);
-    const int server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    address.sin_port        = htons(proxy_config->pop3_listen_port);
+    const int server        = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if(server < 0) {
         error_message = "Unable to create socket";
         goto finally;
     }
 
-    fprintf(stdout, "Listening on TCP port %d\n", port);
+    fprintf(stdout, "Listening on TCP port %d\n", proxy_config->pop3_listen_port);
     setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int));
     if(bind(server, (struct sockaddr*) &address, sizeof(address)) < 0) {
         error_message = "Unable to bind socket";
@@ -62,11 +60,13 @@ int main(int argc, char *argv[]) {
         goto finally;
     }
 
+
     selector = selector_new(SELECTOR_ELEMENTS);
     if(selector == NULL) {
         error_message = "Unable to create selector";
         goto finally;
     }
+
 
     const struct fd_handler pop3_handler = {
             .handle_read    = pop3_passive_accept,
@@ -80,6 +80,7 @@ int main(int argc, char *argv[]) {
         error_message = "Failed registering fd";
         goto finally;
     }
+
 
     while(!done) {
         error_message = NULL;

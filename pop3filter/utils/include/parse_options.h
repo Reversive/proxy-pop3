@@ -5,7 +5,8 @@
 #define _GNU_SOURCE
 #include <getopt.h>
 #include "data_structures.h"
+#include <ctype.h>
 
-void parse_options(int argc, char *argv[], proxy_configuration_ptr proxy_config);
+proxy_configuration_ptr parse_options(int argc, char *argv[]);
 
 #endif

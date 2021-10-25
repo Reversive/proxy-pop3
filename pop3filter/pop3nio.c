@@ -1,10 +1,8 @@
 #include "include/pop3nio.h"
 
-proxy_configuration_ptr proxy_config;
-
 static const unsigned  max_pool  = 50;
 static unsigned        pool_size = 0;
-static struct pop3     *pool     = 0;
+static struct pop3     *pool     = NULL;
 
 enum pop3_state {
     /*
@@ -126,7 +124,8 @@ struct pop3 {
     struct pop3 *           next;
 };
 
-static void pop3_destroy_(struct pop3* s) {
+static void
+pop3_destroy_(struct pop3* s) {
     if(s->origin_resolution != NULL) {
         freeaddrinfo(s->origin_resolution);
         s->origin_resolution = 0;
@@ -134,7 +133,8 @@ static void pop3_destroy_(struct pop3* s) {
     free(s);
 }
 
-static void pop3_destroy(struct pop3 *s) {
+static void
+pop3_destroy(struct pop3 *s) {
     if(s == NULL) {
     } else if(s->references == 1) {
         if(s != NULL) {
@@ -151,7 +151,8 @@ static void pop3_destroy(struct pop3 *s) {
     }
 }
 
-void pop3_pool_destroy(void) {
+void
+pop3_pool_destroy(void) {
     struct pop3 *next, *s;
     for(s = pool; s != NULL ; s = next) {
         next = s->next;
@@ -175,38 +176,53 @@ static const struct fd_handler pop3_handler = {
 };
 
 
-// getaddrinfo(const char *hostname, const char *servname, const struct addrinfo *hints, struct addrinfo **res);
-void * blocking_resolve_origin(void * k) {
+void *
+blocking_resolve_origin(void *k) {
 	struct selector_key *key = (struct selector_key *)k;
     struct pop3 *pop3_ptr = ATTACHMENT(key);
-    struct addrinfo addr_criteria;
     pthread_detach(pthread_self());
-    memset(&addr_criteria, 0, sizeof(addr_criteria));
-    
-    addr_criteria.ai_family      = AF_UNSPEC; //Any addr family
-    addr_criteria.ai_socktype    = SOCK_STREAM; 
-    addr_criteria.ai_protocol    = IPPROTO_TCP;
+    struct addrinfo hints = {
+            .ai_family    = AF_UNSPEC,    /* Allow IPv4 or IPv6 */
+            .ai_socktype  = SOCK_STREAM,  /* Datagram socket */
+            .ai_flags     = AI_PASSIVE,   /* For wildcard IP address */
+            .ai_protocol  = 0,            /* Any protocol */
+            .ai_canonname = NULL,
+            .ai_addr      = NULL,
+            .ai_next      = NULL,
+    };
 
 	char origin_port[7] = {0};
     if (snprintf(origin_port, sizeof(origin_port), "%hu", proxy_config->origin_server_port) < 0) {
         fprintf(stderr, "Error parseando puerto");
     }
     
-    getaddrinfo(proxy_config->origin_server_address, origin_port, 
-        &addr_criteria, &pop3_ptr->origin_resolution);
-    
+    if(getaddrinfo(proxy_config->origin_server_address, origin_port,
+        &hints, &pop3_ptr->origin_resolution) != 0) {
+        fprintf(stderr,"Domain name resolution error\n");
+    }
     selector_notify_block(key->s, key->fd);
+    free(k);
     return NULL;
 }
 
-int resolve_origin(struct selector_key *key) {
+int
+resolve_origin(struct selector_key *key) {
     pthread_t tid;
-    pthread_create(&tid, 0, blocking_resolve_origin, key);
-	return 0;
+    struct selector_key *k = malloc(sizeof(*key));
+    if(k == NULL) return ERROR;
+    memcpy(k, key, sizeof(*k));
+    if(pthread_create(&tid, 0, blocking_resolve_origin, k) == -1) {
+        return ERROR;
+    } else {
+        selector_set_interest_key(key, OP_NOOP);
+    }
+	return RESOLVE_ORIGIN;
 }
 
-int done_resolving_origin(struct selector_key * key) {
-	return 0;
+int
+done_resolving_origin(struct selector_key * key) {
+    fprintf(stdout, "Termine");
+	return DONE;
 }
 
 static const struct state_definition handlers[] = {
@@ -215,29 +231,53 @@ static const struct state_definition handlers[] = {
         .on_write_ready = resolve_origin,
         .on_block_ready = done_resolving_origin
     },
+    {
+        .state          = CONNECT,
+    },
+    {
+        .state          = HELLO,
+    },
+    {
+        .state          = CAPA,
+    },
+    {
+        .state          = REQUEST,
+    },
+    {
+        .state          = RESPONSE,
+    },
+    {
+        .state          = TRANSFORM,
+    },
+    {
+        .state          = DONE,
+    },
+    {
+        .state          = ERROR,
+    }
 
 };
 
-void pop3_passive_accept(struct selector_key *key) {
+void
+pop3_passive_accept(struct selector_key *key) {
+
     struct sockaddr_storage client_address;
     socklen_t               client_address_len  = sizeof(client_address);
     struct pop3             *state              = NULL;
-
     const fd client = accept(key->fd, (struct sockaddr*) &client_address, &client_address_len);
     if(client == -1 || selector_fd_set_nio(client) == -1) {
         goto fail;
     }
-
     if( (state = pop3_new(client)) == NULL ) {
         goto fail;
     }
-
     memcpy(&state->client_address, &client_address, client_address_len);
     state->client_address_len = client_address_len;
 
     if(selector_register(key->s, client, &pop3_handler, OP_WRITE, state) != SELECTOR_SUCCESS) {
         goto fail;
     }
+
     return;
 
     fail:
@@ -248,33 +288,34 @@ void pop3_passive_accept(struct selector_key *key) {
 }
 
 
-static struct pop3 * pop3_new(int client_fd) {
-    struct pop3 *pop3;
+static struct pop3 *
+pop3_new(int client_fd) {
+    struct pop3 *pop3_ptr;
     if (pool == NULL) {
-        pop3 = malloc(sizeof(*pop3));
+        pop3_ptr = malloc(sizeof(*pop3_ptr));
     } else {
-        pop3       = pool;
+        pop3_ptr       = pool;
         pool       = pool->next;
-        pop3->next = 0;
+        pop3_ptr->next = 0;
     }
-    memset(pop3, 0x00, sizeof(*pop3));
-    pop3->origin_fd             = -1;
-    pop3->client_fd             = client_fd;
-    pop3->client_address_len    = sizeof(client_fd);
-
-    pop3->stm.initial           = RESOLVE_ORIGIN;
-    pop3->stm.max_state         = ERROR;
-    pop3->stm.states            = handlers; //TODO: Implementar los estados
-    stm_init(&pop3->stm);
-
+    memset(pop3_ptr, 0x00, sizeof(*pop3_ptr));
+    pop3_ptr->origin_fd             = -1;
+    pop3_ptr->client_fd             = client_fd;
+    pop3_ptr->client_address_len    = sizeof(client_fd);
+    pop3_ptr->stm.initial           = RESOLVE_ORIGIN;
+    pop3_ptr->stm.max_state         = ERROR;
+    pop3_ptr->stm.states            = handlers;
+    stm_init(&pop3_ptr->stm);
     // TODO: Agregar r/w buffers
-    pop3->references            = 1;
-    return pop3;
+    pop3_ptr->references            = 1;
+    return pop3_ptr;
 }
 
-static void pop3_done(struct selector_key* key);
+static void
+pop3_done(struct selector_key* key);
 
-static void pop3_read(struct selector_key *key) {
+static void
+pop3_read(struct selector_key *key) {
     struct state_machine *stm   = &ATTACHMENT(key)->stm;
     const enum pop3_state st = stm_handler_read(stm, key);
 
@@ -283,7 +324,8 @@ static void pop3_read(struct selector_key *key) {
     }
 }
 
-static void pop3_write(struct selector_key *key) {
+static void
+pop3_write(struct selector_key *key) {
     struct state_machine *stm   = &ATTACHMENT(key)->stm;
     const enum pop3_state st = stm_handler_write(stm, key);
 
@@ -292,7 +334,8 @@ static void pop3_write(struct selector_key *key) {
     }
 }
 
-static void pop3_block(struct selector_key *key) {
+static void
+pop3_block(struct selector_key *key) {
     struct state_machine *stm   = &ATTACHMENT(key)->stm;
     const enum pop3_state st = stm_handler_block(stm, key);
 
@@ -301,11 +344,13 @@ static void pop3_block(struct selector_key *key) {
     }
 }
 
-static void pop3_close(struct selector_key *key) {
+static void
+pop3_close(struct selector_key *key) {
     pop3_destroy(ATTACHMENT(key));
 }
 
-static void pop3_done(struct selector_key* key) {
+static void
+pop3_done(struct selector_key* key) {
     const int fds[] = {
             ATTACHMENT(key)->client_fd,
             ATTACHMENT(key)->origin_fd,
