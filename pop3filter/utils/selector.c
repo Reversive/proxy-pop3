@@ -22,8 +22,7 @@
 #define ERROR_DEFAULT_MSG "something failed"
 
 /** retorna una descripciÃ³n humana del fallo */
-const char *
-selector_error(const selector_status status) {
+const char * selector_error(const selector_status status) {
     const char *msg;
     switch(status) {
         case SELECTOR_SUCCESS:
@@ -48,8 +47,7 @@ selector_error(const selector_status status) {
 }
 
 
-static void
-wake_handler(const int signal) {
+static void wake_handler(const int signal) {
     // nada que hacer. estÃ¡ solo para interrumpir el select
 }
 
@@ -57,8 +55,7 @@ wake_handler(const int signal) {
 struct selector_init conf;
 static sigset_t emptyset, blockset;
 
-selector_status
-selector_init(const struct selector_init  *c) {
+selector_status selector_init(const struct selector_init  *c) {
     memcpy(&conf, c, sizeof(conf));
 
     // inicializamos el sistema de comunicaciÃ³n entre threads y el selector
@@ -93,8 +90,7 @@ finally:
     return ret;
 }
 
-selector_status
-selector_close(void) {
+selector_status selector_close(void) {
     // Nada para liberar.
     // TODO(juan): podriamos reestablecer el handler de la seÃ±al.
     return SELECTOR_SUCCESS;
@@ -168,8 +164,7 @@ struct fdselector {
  * determina el tamaÃ±o a crecer, generando algo de slack para no tener
  * que realocar constantemente.
  */
-static
-size_t next_capacity(const size_t n) {
+static size_t next_capacity(const size_t n) {
     unsigned bits = 0;
     size_t tmp = n;
     while(tmp != 0) {
@@ -186,8 +181,7 @@ size_t next_capacity(const size_t n) {
     return tmp + 1;
 }
 
-static inline void
-item_init(struct item *item) {
+static inline void item_init(struct item *item) {
     item->fd = FD_UNUSED;
 }
 
@@ -195,8 +189,7 @@ item_init(struct item *item) {
  * inicializa los nuevos items. `last' es el indice anterior.
  * asume que ya estÃ¡ blanqueada la memoria.
  */
-static void
-items_init(fd_selector s, const size_t last) {
+static void items_init(fd_selector s, const size_t last) {
     assert(last <= s->fd_size);
     for(size_t i = last; i < s->fd_size; i++) {
         item_init(s->fds + i);
@@ -206,8 +199,7 @@ items_init(fd_selector s, const size_t last) {
 /**
  * calcula el fd maximo para ser utilizado en select()
  */
-static int
-items_max_fd(fd_selector s) {
+static int items_max_fd(fd_selector s) {
     int max = 0;
     for(int i = 0; i <= s->max_fd; i++) {
         struct item *item = s->fds + i;
@@ -220,8 +212,7 @@ items_max_fd(fd_selector s) {
     return max;
 }
 
-static void
-items_update_fdset_for_fd(fd_selector s, const struct item * item) {
+static void items_update_fdset_for_fd(fd_selector s, const struct item * item) {
     FD_CLR(item->fd, &s->master_r);
     FD_CLR(item->fd, &s->master_w);
 
@@ -241,8 +232,7 @@ items_update_fdset_for_fd(fd_selector s, const struct item * item) {
  * Se asegura de que `n' sea un nÃºmero que la plataforma donde corremos lo
  * soporta
  */
-static selector_status
-ensure_capacity(fd_selector s, const size_t n) {
+static selector_status ensure_capacity(fd_selector s, const size_t n) {
     selector_status ret = SELECTOR_SUCCESS;
 
     const size_t element_size = sizeof(*s->fds);
@@ -286,8 +276,7 @@ ensure_capacity(fd_selector s, const size_t n) {
     return ret;
 }
 
-fd_selector
-selector_new(const size_t initial_elements) {
+fd_selector selector_new(const size_t initial_elements) {
     size_t size = sizeof(struct fdselector);
     fd_selector ret = malloc(size);
     if(ret != NULL) {
@@ -305,8 +294,7 @@ selector_new(const size_t initial_elements) {
     return ret;
 }
 
-void
-selector_destroy(fd_selector s) {
+void selector_destroy(fd_selector s) {
     // lean ya que se llama desde los casos fallidos de _new.
     if(s != NULL) {
         if(s->fds != NULL) {
@@ -330,8 +318,7 @@ selector_destroy(fd_selector s) {
 
 #define INVALID_FD(fd)  ((fd) < 0 || (fd) >= ITEMS_MAX_SIZE)
 
-selector_status
-selector_register(fd_selector        s,
+selector_status selector_register(fd_selector        s,
                      const int          fd,
                      const fd_handler  *handler,
                      const fd_interest  interest,

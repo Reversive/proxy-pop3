@@ -34,8 +34,7 @@ void print_help() {
     exit(STATUS_SUCCESS);
 }
 
-proxy_configuration_ptr
-init_proxy_config() {
+proxy_configuration_ptr init_proxy_config() {
     proxy_configuration_ptr proxy_config    = malloc(sizeof(*proxy_config));
     proxy_config->error_file_path           = "/dev/null";
     proxy_config->pop3_listen_address       = "0.0.0.0";
@@ -45,10 +44,10 @@ init_proxy_config() {
     proxy_config->origin_server_port        = 110;
     return proxy_config;
 }
-proxy_configuration_ptr
-parse_options(int argc, char *argv[]) {
+proxy_configuration_ptr parse_options(int argc, char *argv[]) {
     proxy_configuration_ptr proxy_config = init_proxy_config();
     int option;
+
     while((option = getopt(argc, argv, "e:hl:L:o:p:P:t:v")) != -1) {
         switch (option) {
         case 'e':
@@ -64,6 +63,7 @@ parse_options(int argc, char *argv[]) {
             proxy_config->admin_listen_address = optarg;
             break;
         case 'o':
+            proxy_config->admin_listen_port = atoi(optarg);
             break;
         case 'p':
             proxy_config->pop3_listen_port = atoi(optarg);
@@ -86,6 +86,7 @@ parse_options(int argc, char *argv[]) {
                 fprintf (stderr,"Unknown option character `\\x%x'.\n", optopt);
             }
             break;
+
         default:
             fprintf(stderr, "Invalid options, use -h to print help\n");
             exit(STATUS_ERROR);
@@ -103,6 +104,7 @@ parse_options(int argc, char *argv[]) {
         printf ("Invalid argument %s\n", argv[index]);
         is_invalid_arg = 1;
     }
+
     if(is_invalid_arg)
         exit(STATUS_SUCCESS);
 

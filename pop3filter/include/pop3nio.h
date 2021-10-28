@@ -17,6 +17,7 @@
 #include "../utils/include/netutils.h"
 #include "../utils/include/selector.h"
 #include "../utils/include/data_structures.h"
+#include "../utils/include/logger.h"
 #define N(x) (sizeof(x)/sizeof((x)[0]))
 
 void pop3_passive_accept(struct selector_key *key);

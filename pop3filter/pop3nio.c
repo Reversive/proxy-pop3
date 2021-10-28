@@ -11,7 +11,7 @@ enum pop3_state {
      *      - OP_READ   over client_fd
      * Transitions:
      *      - CONNECT   when the name is resolved
-     *      - ERROR     if getaddrinfo fails
+     *      - FAILURE     if getaddrinfo fails
      */
     RESOLVE_ORIGIN,
 
@@ -21,7 +21,7 @@ enum pop3_state {
      *      - None
      * Transitions:
      *      - HELLO     when the connection is established
-     *      - ERROR     if connection failed
+     *      - FAILURE     if connection failed
      */
     CONNECT,
 
@@ -32,7 +32,7 @@ enum pop3_state {
      * Transitions:
      *      - HELLO     while the message is not complete
      *      - CAPA      when the message is complete
-     *      - ERROR     if connection failed
+     *      - FAILURE     if connection failed
      */
     HELLO,
 
@@ -43,7 +43,7 @@ enum pop3_state {
      * Transitions:
      *      - CAPA      while the message is not complete
      *      - REQUEST   when the message is complete
-     *      - ERROR     if connection failed
+     *      - FAILURE     if connection failed
      */
     CAPA,
 
@@ -55,7 +55,7 @@ enum pop3_state {
     * Transitions:
     *       - REQUEST   while the request is not complete
     *       - RESPONSE  when the request is complete
-    *       - ERROR     if there's any error
+    *       - FAILURE     if there's any FAILURE
     */
     REQUEST,
 
@@ -68,7 +68,7 @@ enum pop3_state {
     *       - RESPONSE  while the response is not complete
     *       - REQUEST   when the response is complete and transformation is not enabled
     *       - TRANSFORM when the response is complete and transformation is enabled
-    *       - ERROR     if there's any error
+    *       - FAILURE     if there's any FAILURE
     */
     RESPONSE,
 
@@ -79,11 +79,11 @@ enum pop3_state {
     * Transitions:
     *       - TRANSFORM     while the transformation is not complete
     *       - REQUEST       when the transformation is complete
-    *       - ERROR         if there's any error
+    *       - FAILURE         if there's any FAILURE
     */
     TRANSFORM,
     DONE,
-    ERROR,
+    FAILURE
 };
 
 
@@ -124,8 +124,7 @@ struct pop3 {
     struct pop3 *           next;
 };
 
-static void
-pop3_destroy_(struct pop3* s) {
+static void pop3_destroy_(struct pop3* s) {
     if(s->origin_resolution != NULL) {
         freeaddrinfo(s->origin_resolution);
         s->origin_resolution = 0;
@@ -133,8 +132,7 @@ pop3_destroy_(struct pop3* s) {
     free(s);
 }
 
-static void
-pop3_destroy(struct pop3 *s) {
+static void pop3_destroy(struct pop3 *s) {
     if(s == NULL) {
     } else if(s->references == 1) {
         if(s != NULL) {
@@ -151,8 +149,7 @@ pop3_destroy(struct pop3 *s) {
     }
 }
 
-void
-pop3_pool_destroy(void) {
+void pop3_pool_destroy(void) {
     struct pop3 *next, *s;
     for(s = pool; s != NULL ; s = next) {
         next = s->next;
@@ -176,8 +173,7 @@ static const struct fd_handler pop3_handler = {
 };
 
 
-void *
-blocking_resolve_origin(void *k) {
+void * blocking_resolve_origin(void *k) {
 	struct selector_key *key = (struct selector_key *)k;
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     pthread_detach(pthread_self());
@@ -205,25 +201,89 @@ blocking_resolve_origin(void *k) {
     return NULL;
 }
 
-int
-resolve_origin(struct selector_key *key) {
+int resolve_origin(struct selector_key *key) {
     pthread_t tid;
     struct selector_key *k = malloc(sizeof(*key));
-    if(k == NULL) return ERROR;
+    if(k == NULL)
+        return FAILURE;
+    
     memcpy(k, key, sizeof(*k));
     if(pthread_create(&tid, 0, blocking_resolve_origin, k) == -1) {
-        return ERROR;
+        return FAILURE;
     } else {
         selector_set_interest_key(key, OP_NOOP);
     }
 	return RESOLVE_ORIGIN;
 }
 
-int
-done_resolving_origin(struct selector_key * key) {
-    fprintf(stdout, "Termine");
-	return DONE;
+int connect_to_origin(struct selector_key * key) {
+    struct pop3 *pop3_ptr = ATTACHMENT(key);
+
+    int sock = -1;
+	for (struct addrinfo *addr = pop3_ptr->origin_resolution; addr != NULL && sock == -1; addr = addr->ai_next) {
+		// Create a reliable, stream socket using TCP
+		sock = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
+		if (sock >= 0) {
+			errno = 0;
+			// Establish the connection to the server
+            if(selector_fd_set_nio(sock) == -1)
+                return FAILURE;            
+        
+			if (connect(sock, addr->ai_addr, addr->ai_addrlen) == -1 && errno == EINPROGRESS) {
+				if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+                    return FAILURE;
+
+                if(selector_register(key->s, sock, &pop3_handler, OP_WRITE, key->data) != SELECTOR_SUCCESS)
+                    return FAILURE;
+			} else {
+                //no se pudo con este
+                close(sock);
+                sock = -1;
+            }
+		} else {
+            return FAILURE;
+			//log(DEBUG, "Can't create client socket on %s",printAddressPort(addr, addrBuffer)) 
+		}
+	}
+	freeaddrinfo(pop3_ptr->origin_resolution); 
+	return (sock == -1) ? FAILURE : CONNECT;
 }
+
+int done_resolving_origin(struct selector_key * key) {
+    struct pop3 *pop3_ptr = ATTACHMENT(key);
+    
+	return pop3_ptr->origin_resolution == NULL ? FAILURE : connect_to_origin(key);
+}
+
+
+
+void send_error(int fd, const char *error) {
+    send(fd, error, strlen(error), 0);
+}
+
+int connection(struct selector_key *key){
+    struct pop3 *pop3_ptr = ATTACHMENT(key);
+    int error;
+    socklen_t len = sizeof(error);
+    if(getsockopt(key->fd, SOL_SOCKET, SO_ERROR, &error, &len) < 0) {
+        send_error(pop3_ptr->client_fd, "-ERR Connection refused.\r\n");
+        fprintf(stderr, "Connection to origin failed\n");
+        selector_set_interest_key(key, OP_NOOP);
+        return FAILURE;
+    } else {
+        if(error == 0) {
+            pop3_ptr->origin_fd = key->fd;
+            send_error(pop3_ptr->client_fd, "Welcome to the best POP3 server.");
+        } else {
+            send_error(pop3_ptr->origin_fd, "-ERR Connection refused.\r\n");
+            fprintf(stderr, "Connection to origin failed\n");
+            selector_set_interest_key(key, OP_NOOP);
+            return FAILURE;
+        }
+    }
+
+    return DONE;
+} 
 
 static const struct state_definition handlers[] = {
     {
@@ -233,6 +293,7 @@ static const struct state_definition handlers[] = {
     },
     {
         .state          = CONNECT,
+        .on_write_ready = connection,
     },
     {
         .state          = HELLO,
@@ -253,24 +314,24 @@ static const struct state_definition handlers[] = {
         .state          = DONE,
     },
     {
-        .state          = ERROR,
+        .state          = FAILURE,
     }
 
 };
 
-void
-pop3_passive_accept(struct selector_key *key) {
-
+void pop3_passive_accept(struct selector_key *key) {
     struct sockaddr_storage client_address;
     socklen_t               client_address_len  = sizeof(client_address);
     struct pop3             *state              = NULL;
+
     const fd client = accept(key->fd, (struct sockaddr*) &client_address, &client_address_len);
-    if(client == -1 || selector_fd_set_nio(client) == -1) {
+
+    if(client == -1 || selector_fd_set_nio(client) == -1) 
         goto fail;
-    }
-    if( (state = pop3_new(client)) == NULL ) {
+    
+    if( (state = pop3_new(client)) == NULL ) 
         goto fail;
-    }
+    
     memcpy(&state->client_address, &client_address, client_address_len);
     state->client_address_len = client_address_len;
 
@@ -288,8 +349,7 @@ pop3_passive_accept(struct selector_key *key) {
 }
 
 
-static struct pop3 *
-pop3_new(int client_fd) {
+static struct pop3 * pop3_new(int client_fd) {
     struct pop3 *pop3_ptr;
     if (pool == NULL) {
         pop3_ptr = malloc(sizeof(*pop3_ptr));
@@ -303,7 +363,7 @@ pop3_new(int client_fd) {
     pop3_ptr->client_fd             = client_fd;
     pop3_ptr->client_address_len    = sizeof(client_fd);
     pop3_ptr->stm.initial           = RESOLVE_ORIGIN;
-    pop3_ptr->stm.max_state         = ERROR;
+    pop3_ptr->stm.max_state         = FAILURE;
     pop3_ptr->stm.states            = handlers;
     stm_init(&pop3_ptr->stm);
     // TODO: Agregar r/w buffers
@@ -311,46 +371,40 @@ pop3_new(int client_fd) {
     return pop3_ptr;
 }
 
-static void
-pop3_done(struct selector_key* key);
+static void pop3_done(struct selector_key* key);
 
-static void
-pop3_read(struct selector_key *key) {
+static void pop3_read(struct selector_key *key) {
     struct state_machine *stm   = &ATTACHMENT(key)->stm;
     const enum pop3_state st = stm_handler_read(stm, key);
 
-    if(ERROR == st || DONE == st) {
+    if(FAILURE == st || DONE == st) {
         pop3_done(key);
     }
 }
 
-static void
-pop3_write(struct selector_key *key) {
+static void pop3_write(struct selector_key *key) {
     struct state_machine *stm   = &ATTACHMENT(key)->stm;
     const enum pop3_state st = stm_handler_write(stm, key);
 
-    if(ERROR == st || DONE == st) {
+    if(FAILURE == st || DONE == st) {
         pop3_done(key);
     }
 }
 
-static void
-pop3_block(struct selector_key *key) {
+static void pop3_block(struct selector_key *key) {
     struct state_machine *stm   = &ATTACHMENT(key)->stm;
     const enum pop3_state st = stm_handler_block(stm, key);
 
-    if(ERROR == st || DONE == st) {
+    if(FAILURE == st || DONE == st) {
         pop3_done(key);
     }
 }
 
-static void
-pop3_close(struct selector_key *key) {
+static void pop3_close(struct selector_key *key) {
     pop3_destroy(ATTACHMENT(key));
 }
 
-static void
-pop3_done(struct selector_key* key) {
+static void pop3_done(struct selector_key* key) {
     const int fds[] = {
             ATTACHMENT(key)->client_fd,
             ATTACHMENT(key)->origin_fd,
