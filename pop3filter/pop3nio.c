@@ -136,8 +136,8 @@ struct pop3 {
     uint8_t read_buffer[BUFFER_SIZE];
     uint8_t write_buffer[BUFFER_SIZE];
 
-    t_buffer* client_to_origin;
-    t_buffer* origin_to_client;
+    t_buffer client_to_origin;
+    t_buffer origin_to_client;
 
     struct state_machine    stm;
     unsigned                references;
@@ -268,13 +268,13 @@ static int read_hello(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
 
     size_t max_size;
-    uint8_t* ptr = buffer_write_ptr(pop3_ptr->origin_to_client, &max_size);
+    uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
     ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
     if (read_chars <= 0) {
         send_error(pop3_ptr->client_fd, "Error reading from origin");
         return FAILURE;
     }
-    buffer_write_adv(pop3_ptr->origin_to_client, read_chars);
+    buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
 
     if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
         return FAILURE;
@@ -285,14 +285,14 @@ static int read_hello(struct selector_key* key) {
 static int write_hello(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
     size_t max_size;
-    uint8_t* ptr = buffer_read_ptr(pop3_ptr->origin_to_client, &max_size);
+    uint8_t* ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
         send_error(pop3_ptr->client_fd, "Error reading from origin");
         return FAILURE;
     }
     
-    buffer_read_adv(pop3_ptr->origin_to_client, sent_bytes);
+    buffer_read_adv(&pop3_ptr->origin_to_client, sent_bytes);
 
     if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_READ) != SELECTOR_SUCCESS)
         return FAILURE;
@@ -385,8 +385,8 @@ static struct pop3* pop3_new(int client_fd) {
     pop3_ptr->stm.states = handlers;
     stm_init(&pop3_ptr->stm);
 
-    buffer_init(pop3_ptr->client_to_origin, BUFFER_SIZE, pop3_ptr->read_buffer);
-    buffer_init(pop3_ptr->origin_to_client, BUFFER_SIZE, pop3_ptr->write_buffer);
+    buffer_init(&pop3_ptr->client_to_origin, BUFFER_SIZE, pop3_ptr->read_buffer);
+    buffer_init(&pop3_ptr->origin_to_client, BUFFER_SIZE, pop3_ptr->write_buffer);
     // TODO: Agregar r/w buffers
     pop3_ptr->references = 1;
     return pop3_ptr;
