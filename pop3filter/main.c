@@ -69,9 +69,7 @@ int main(int argc, char *argv[]) {
 
 
     const struct fd_handler pop3_handler = {
-            .handle_read    = pop3_passive_accept,
-            .handle_write   = NULL,
-            .handle_close   = NULL,
+            .handle_read    = pop3_passive_accept
     };
 
     status = selector_register(selector, server, &pop3_handler, OP_READ, NULL);

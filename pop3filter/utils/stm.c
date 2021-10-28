@@ -27,7 +27,7 @@ void stm_init(struct state_machine * stm) {
 inline static void handle_first(struct state_machine * stm, key_ptr key) {
     if (stm->current == NULL) {
         stm->current = stm->states + stm->initial;
-        if (NULL != stm->current->on_arrival) {
+        if (stm->current->on_arrival != NULL) {
             stm->current->on_arrival(key);
         }
     }
@@ -45,7 +45,7 @@ inline static void jump(struct state_machine * stm, int next, key_ptr key) {
 
         stm->current = stm->states + next;
 
-        if (NULL != stm->current->on_arrival) {
+        if (stm->current->on_arrival != NULL) {
             stm->current->on_arrival(key);
         }
     }
