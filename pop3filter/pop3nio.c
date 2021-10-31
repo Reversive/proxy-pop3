@@ -1,6 +1,5 @@
 #include "include/pop3nio.h"
 
-
 #define ATTACHMENT(key) ( (struct pop3 *)(key)->data)
 #define BUFFER_SIZE 1024
 
@@ -161,6 +160,19 @@ static const struct fd_handler pop3_handler = {
         .handle_block = pop3_block,
 };
 
+static int is_ipv6(const char* host) {
+    struct sockaddr_in6 sa;
+    return inet_pton(AF_INET6, host, &(sa.sin6_addr));
+}
+
+static int is_ipv4(const char* host) {
+    struct sockaddr_in sa;
+    return inet_pton(AF_INET, host, &(sa.sin_addr));
+}
+
+int is_valid_ip(const char* host) {
+    return is_ipv4(host) || is_ipv6(host);
+}
 
 static void* blocking_resolve_origin(void* k) {
     struct selector_key* key = (struct selector_key*)k;
@@ -191,14 +203,64 @@ static void* blocking_resolve_origin(void* k) {
     return NULL;
 }
 
+void send_error(int fd, const char* error) {
+    send(fd, error, strlen(error), 0);
+}
+
+static int connect_to_origin_by_ip(struct selector_key *key, int family, void *sock_addr, socklen_t sock_addr_size ) {
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    int sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
+    if (sock >= 0) {
+        errno = 0;
+        if (selector_fd_set_nio(sock) == -1) {
+            goto ip_connect_fail;   
+        }
+        int ret = connect(sock, (struct sockaddr *) sock_addr, sock_addr_size);
+        if (ret == -1 && errno == EINPROGRESS) {
+            if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_register(key->s, sock, &pop3_handler, OP_WRITE, key->data) != SELECTOR_SUCCESS) {
+                goto ip_connect_fail;
+            }
+            return CONNECT;
+        } else if(ret == 0) {
+            pop3_ptr->origin_fd = sock;
+            send_error(pop3_ptr->client_fd, "Welcome to the best POP3 server.");
+            if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+                goto ip_connect_fail;     
+                
+            if (selector_register(key->s, sock, &pop3_handler, OP_READ, key->data) != SELECTOR_SUCCESS)
+                goto ip_connect_fail;
+                   
+            return HELLO;
+        } else {
+            log(DEBUG, "%d", errno);
+            goto ip_connect_fail;
+        }
+    }
+ip_connect_fail:
+    perror("Error: ");
+    if(sock != -1)
+        close(sock);
+
+    return FAILURE_WITH_MESSAGE;
+}
+
 static int resolve_origin(struct selector_key* key) {
     pthread_t tid;
     struct selector_key* k = malloc(sizeof(*key));
     if (k == NULL)
         return FAILURE;
 
-    //if(is_ip(proxy_config->origin_server_address) == 0)
-
+    if(is_ipv4(proxy_config->origin_server_address)) {
+        fprintf(stderr, "Entre por ipv4");
+        struct sockaddr_in servaddr;
+        inet_pton(AF_INET6, proxy_config->origin_server_address, &(servaddr.sin_addr));
+        return connect_to_origin_by_ip(key, AF_INET, (void*)&servaddr, sizeof(servaddr));
+    } else if (is_ipv6(proxy_config->origin_server_address)) {
+        fprintf(stderr, "Entre por ipv6");
+        struct sockaddr_in6 servaddr;
+        inet_pton(AF_INET6, proxy_config->origin_server_address, &(servaddr.sin6_addr));
+        return connect_to_origin_by_ip(key, AF_INET6, (void*)&servaddr, sizeof(servaddr));
+    }
     memcpy(k, key, sizeof(*k));
     if (pthread_create(&tid, 0, blocking_resolve_origin, k) == -1) {
         return FAILURE;
@@ -211,7 +273,7 @@ static int resolve_origin(struct selector_key* key) {
 
 static int connect_to_origin(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
-
+    
     int sock = -1;
     while (pop3_ptr->current_res != NULL && sock == -1) {
         sock = socket(pop3_ptr->current_res->ai_family, pop3_ptr->current_res->ai_socktype, pop3_ptr->current_res->ai_protocol);
@@ -252,9 +314,7 @@ static int done_resolving_origin(struct selector_key* key) {
     return pop3_ptr->origin_resolution == NULL ? FAILURE : connect_to_origin(key);
 }
 
-void send_error(int fd, const char* error) {
-    send(fd, error, strlen(error), 0);
-}
+
 
 static int connection(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
@@ -272,8 +332,11 @@ static int connection(struct selector_key* key) {
         }
         return connect_to_origin(key);
     }
-    
-    freeaddrinfo(pop3_ptr->origin_resolution);
+    if(pop3_ptr->origin_resolution != NULL) {
+        freeaddrinfo(pop3_ptr->origin_resolution);
+        pop3_ptr->origin_resolution = NULL;
+    }
+        
     pop3_ptr->origin_fd = key->fd;
     send_error(pop3_ptr->client_fd, "Welcome to the best POP3 server.");
 
@@ -288,6 +351,7 @@ static int read_hello(struct selector_key* key) {
     uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
     ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
     if (read_chars <= 0) {
+        perror("recv");
         pop3_ptr->error_message.message = "Error reading from origin";
         if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
@@ -308,7 +372,7 @@ static int write_hello(struct selector_key* key) {
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
-        pop3_ptr->error_message.message = "Error reading from origin";
+        pop3_ptr->error_message.message = "Error writing from origin";
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
@@ -520,5 +584,4 @@ void pop3_pool_destroy(void) {
         free(s);
     }
 }
-
 
