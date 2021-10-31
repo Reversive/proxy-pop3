@@ -226,7 +226,7 @@ static int connect_to_origin_by_ip(struct selector_key *key, int family, void *s
             send_error(pop3_ptr->client_fd, "Welcome to the best POP3 server.");
             if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
                 goto ip_connect_fail;     
-                
+
             if (selector_register(key->s, sock, &pop3_handler, OP_READ, key->data) != SELECTOR_SUCCESS)
                 goto ip_connect_fail;
                    
@@ -251,13 +251,15 @@ static int resolve_origin(struct selector_key* key) {
         return FAILURE;
 
     if(is_ipv4(proxy_config->origin_server_address)) {
-        fprintf(stderr, "Entre por ipv4");
         struct sockaddr_in servaddr;
-        inet_pton(AF_INET6, proxy_config->origin_server_address, &(servaddr.sin_addr));
+        fprintf(stderr, "%d", inet_pton(AF_INET, proxy_config->origin_server_address, &(servaddr.sin_addr)));
+        servaddr.sin_family = AF_INET;
+        servaddr.sin_port = htons(proxy_config->origin_server_port);
         return connect_to_origin_by_ip(key, AF_INET, (void*)&servaddr, sizeof(servaddr));
     } else if (is_ipv6(proxy_config->origin_server_address)) {
-        fprintf(stderr, "Entre por ipv6");
         struct sockaddr_in6 servaddr;
+        servaddr.sin6_family = AF_INET6;
+        servaddr.sin6_port = htons(proxy_config->origin_server_port);
         inet_pton(AF_INET6, proxy_config->origin_server_address, &(servaddr.sin6_addr));
         return connect_to_origin_by_ip(key, AF_INET6, (void*)&servaddr, sizeof(servaddr));
     }
@@ -310,7 +312,6 @@ connect_fail:
 
 static int done_resolving_origin(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
-
     return pop3_ptr->origin_resolution == NULL ? FAILURE : connect_to_origin(key);
 }
 
