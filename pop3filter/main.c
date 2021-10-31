@@ -3,8 +3,7 @@
 proxy_configuration_ptr proxy_config;
 static bool done = false;
 
-static void
-sigterm_handler(const int signal) {
+static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);
     done = true;
 }
@@ -16,27 +15,7 @@ int main(int argc, char *argv[]) {
     const char *error_message   = NULL;
     selector_status status      = SELECTOR_SUCCESS;
     fd_selector selector        = NULL;
-
-    /*
-    struct sockaddr_in address;
-    memset(&address, 0, sizeof(address));
-    address.sin_family      = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_ANY);
-    address.sin_port        = htons(proxy_config->pop3_listen_port);
-    const int server        = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if(server < 0) {
-        error_message = "Unable to create socket";
-        goto finally;
-    }
-
     fprintf(stdout, "Listening on TCP port %d\n", proxy_config->pop3_listen_port);
-    setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int));
-    if(bind(server, (struct sockaddr*) &address, sizeof(address)) < 0) {
-        error_message = "Unable to bind socket";
-        goto finally;
-    }
-    */
-
     struct addrinfo address_criteria;
 	memset(&address_criteria, 0, sizeof(address_criteria));
 	address_criteria.ai_family = AF_INET6;
@@ -69,6 +48,11 @@ int main(int argc, char *argv[]) {
 			//log(ERROR, "Set socket options failed");
 			continue;
 		}
+        int yes = 1;
+        if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
+            //log(ERROR, "Set socket options failed");
+            continue;
+        }
 
 		int can_bind = false;
 		if (bind(server, addr->ai_addr, addr->ai_addrlen) == 0) {
