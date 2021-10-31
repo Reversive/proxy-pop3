@@ -25,7 +25,7 @@ enum pop3_state {
      *      - OP_READ   over client_fd
      * Transitions:
      *      - CONNECT   when the name is resolved
-     *      - FAILURE     if getaddrinfo fails
+     *      - FAILURE   if getaddrinfo fails
      */
     RESOLVE_ORIGIN,
 
@@ -35,7 +35,7 @@ enum pop3_state {
      *      - None
      * Transitions:
      *      - HELLO     when the connection is established
-     *      - FAILURE     if connection failed
+     *      - FAILURE   if connection failed
      */
      CONNECT,
 
@@ -46,7 +46,7 @@ enum pop3_state {
       * Transitions:
       *      - HELLO     while the message is not complete
       *      - CAPA      when the message is complete
-      *      - FAILURE     if connection failed
+      *      - FAILURE   if connection failed
       */
       HELLO,
 
@@ -57,7 +57,7 @@ enum pop3_state {
        * Transitions:
        *      - CAPA      while the message is not complete
        *      - REQUEST   when the message is complete
-       *      - FAILURE     if connection failed
+       *      - FAILURE   if connection failed
        */
        CAPA,
 
@@ -69,7 +69,7 @@ enum pop3_state {
        * Transitions:
        *       - REQUEST   while the request is not complete
        *       - RESPONSE  when the request is complete
-       *       - FAILURE     if there's any FAILURE
+       *       - FAILURE   if there's any FAILURE
        */
        REQUEST,
 
@@ -93,7 +93,7 @@ enum pop3_state {
        * Transitions:
        *       - TRANSFORM     while the transformation is not complete
        *       - REQUEST       when the transformation is complete
-       *       - FAILURE         if there's any FAILURE
+       *       - FAILURE       if there's any FAILURE
        */
        TRANSFORM,
        DONE,
@@ -237,7 +237,11 @@ connect_fail:
     
     if(sock == -1) {
         freeaddrinfo(pop3_ptr->origin_resolution);
-        return FAILURE;
+        pop3_ptr->error_message.message = "-ERR Connection refused.\r\n";
+        if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE;
+
+        return FAILURE_WITH_MESSAGE;
     }
     return CONNECT;
 }

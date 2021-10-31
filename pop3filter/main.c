@@ -16,6 +16,8 @@ int main(int argc, char *argv[]) {
     const char *error_message   = NULL;
     selector_status status      = SELECTOR_SUCCESS;
     fd_selector selector        = NULL;
+
+    /*
     struct sockaddr_in address;
     memset(&address, 0, sizeof(address));
     address.sin_family      = AF_INET;
@@ -33,6 +35,58 @@ int main(int argc, char *argv[]) {
         error_message = "Unable to bind socket";
         goto finally;
     }
+    */
+
+    struct addrinfo address_criteria;
+	memset(&address_criteria, 0, sizeof(address_criteria));
+	address_criteria.ai_family = AF_INET6;
+	address_criteria.ai_flags = AI_PASSIVE;
+    address_criteria.ai_socktype = SOCK_STREAM;
+    address_criteria.ai_protocol = IPPROTO_TCP;
+
+	struct addrinfo* server_address;
+    char listen_port[7] = { 0 };
+    if (snprintf(listen_port, sizeof(listen_port), "%hu", proxy_config->pop3_listen_port) < 0) {
+        fprintf(stderr, "Error parseando puerto");
+        goto finally;
+    }
+	int rtnVal = getaddrinfo(NULL, listen_port, &address_criteria, &server_address);
+	if (rtnVal != 0) {
+		log(FATAL, "getaddrinfo() failed %s", gai_strerror(rtnVal));
+		goto finally;
+	}
+
+	int server = -1;
+	for (struct addrinfo* addr = server_address; addr != NULL && server == -1; addr = addr->ai_next) {
+		errno = 0;
+		server = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
+		if (server < 0) {
+			continue; 
+		}
+
+		int no = 0;
+		if (setsockopt(server, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&no, sizeof(no)) < 0) {
+			//log(ERROR, "Set socket options failed");
+			continue;
+		}
+
+		int can_bind = false;
+		if (bind(server, addr->ai_addr, addr->ai_addrlen) == 0) {
+			can_bind = true;
+			if (listen(server, 5) != 0) {//TODO cambiar el maxpending
+				can_bind = false;
+			}
+		}
+		if (!can_bind) {
+			log(DEBUG, "Cant't bind %s", strerror(errno));
+			close(server);
+			server = -1;
+		}
+	}
+	freeaddrinfo(server_address);
+    if(server == -1)
+        goto finally;
+    //codigo nuestro
 
     if(listen(server, QUEUE_SIZE) < 0) {
         error_message = "Unable to listen";
