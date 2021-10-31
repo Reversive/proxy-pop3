@@ -2,6 +2,7 @@
 
 #define ATTACHMENT(key) ( (struct pop3 *)(key)->data)
 #define BUFFER_SIZE 1024
+struct parser_definition *end_of_line_parser_def;
 
 static void             pop3_read(struct selector_key* key);
 static void             pop3_write(struct selector_key* key);
@@ -113,10 +114,15 @@ struct response_st {
     uint8_t               method;
 };
 
-struct error_message_st {
+struct message_packet {
     char    *message;
     size_t  length;
     size_t  bytes_sent;
+};
+
+struct hello_st {
+    struct message_packet message;
+    struct parser*        hello_parser;
 };
 
 struct pop3 {
@@ -127,7 +133,9 @@ struct pop3 {
 
     struct addrinfo*        origin_resolution;
     struct addrinfo*        current_res;
-    struct error_message_st error_message;
+    struct message_packet   error_message;
+
+    
 
     struct sockaddr_storage origin_address;
     socklen_t               origin_address_len;
@@ -140,6 +148,7 @@ struct pop3 {
 
     union {
         struct response_st  response;
+        struct hello_st     hello_state;
     } orig;
 
     uint8_t read_buffer[BUFFER_SIZE];
@@ -345,6 +354,20 @@ static int connection(struct selector_key* key) {
     return HELLO;
 }
 
+void on_hello_arrival(struct selector_key* key){
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    end_of_line_parser_def = malloc(sizeof(struct parser_definition));
+    struct parser_definition aux = parser_utils_strcmpi("\r\n");
+    end_of_line_parser_def = &aux;
+    pop3_ptr->orig.hello_state.hello_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
+}
+
+void on_hello_departure(struct selector_key* key){
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    parser_destroy(pop3_ptr->orig.hello_state.hello_parser);
+    free(end_of_line_parser_def);
+}
+
 static int read_hello(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
 
@@ -352,7 +375,6 @@ static int read_hello(struct selector_key* key) {
     uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
     ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
     if (read_chars <= 0) {
-        perror("recv");
         pop3_ptr->error_message.message = "Error reading from origin";
         if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
@@ -360,6 +382,8 @@ static int read_hello(struct selector_key* key) {
         return FAILURE_WITH_MESSAGE;
     }
     buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
+    //const struct parser_event* state = parser_feed(pop_ptr->end_of_line_parser);
+
 
     if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
         return FAILURE;
@@ -418,8 +442,10 @@ static const struct state_definition handlers[] = {
     },
     {
         .state = HELLO,
-        .on_read_ready = read_hello,
-        .on_write_ready = write_hello
+        .on_read_ready  = read_hello,
+        .on_write_ready = write_hello,
+        .on_arrival     = on_hello_arrival,
+        .on_departure   = on_hello_departure
     },
     {
         .state = CAPA,

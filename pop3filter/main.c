@@ -3,6 +3,7 @@
 proxy_configuration_ptr proxy_config;
 static bool done = false;
 
+
 static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);
     done = true;
@@ -84,7 +85,7 @@ int main(int argc, char *argv[]) {
         error_message = "Failed setting socket as non-blocking";
         goto finally;
     }
-
+        
     const struct selector_init conf = {
             .signal = SIGALRM,
             .select_timeout = {
