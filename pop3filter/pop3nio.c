@@ -479,6 +479,7 @@ static int hello_write(struct selector_key* key) {
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS){
             return FAILURE;
         }
+        fprintf(stderr, "Habilite para leer al client");
         return REQUEST;
     }
     return HELLO;
@@ -500,14 +501,14 @@ static void request_departure(struct selector_key* key) {
     
 }
 
-static int read_request(struct selector_key* key){
+static int read_request(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     size_t max_size;
     uint8_t* ptr = buffer_write_ptr(&pop3_ptr->client_to_origin, &max_size);
     ssize_t read_chars = recv(pop3_ptr->client_fd, ptr, max_size, 0);
     if (read_chars <= 0) {
         pop3_ptr->error_message.message = "Error reading from client";
-        if (selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
+        if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
         return FAILURE_WITH_MESSAGE;
@@ -518,8 +519,10 @@ static int read_request(struct selector_key* key){
         if(state->type == STRING_CMP_EQ) {
             if(selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS
             || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+                return FAILURE;
             pop3_ptr->current_command = CMD_CAPA;
-            return FAILURE;
+        } else if(state->type == STRING_CMP_NEQ) {
+            parser_reset(pop3_ptr->client.request.capa_parser);
         } else if(state->type == STRING_CMP_NEQ) {
             parser_reset(pop3_ptr->client.request.capa_parser);
         }
