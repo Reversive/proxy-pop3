@@ -164,7 +164,6 @@ struct message_packet {
 };
 
 struct hello_st {
-    struct message_packet message;
     struct parser*        hello_parser;
 };
 
@@ -398,7 +397,7 @@ void hello_arrival(struct selector_key* key){
     struct pop3* pop3_ptr = ATTACHMENT(key);
     end_of_line_parser_def = malloc(sizeof(struct parser_definition));
     struct parser_definition aux = parser_utils_strcmpi("\r\n");
-    end_of_line_parser_def = &aux;
+    memcpy(end_of_line_parser_def, &aux, sizeof(struct parser_definition));
     pop3_ptr->orig.hello_state.hello_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
 }
 
@@ -421,35 +420,53 @@ static int read_hello(struct selector_key* key) {
         
         return FAILURE_WITH_MESSAGE;
     }
-    buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
 
-    if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
-        return FAILURE;
+    /*
+    char aux_buff[1024] = {0};
+    memcpy(aux_buff, ptr, read_chars);
+    fprintf(stderr, "%s", aux_buff);
+    */
+
+    for(int i = 0; i < read_chars; i++) {
+        fprintf(stderr, "%c", ptr[i]);
+        const struct parser_event* state = parser_feed(pop3_ptr->orig.hello_state.hello_parser, ptr[i]);
+        if(state->type == STRING_CMP_EQ) {
+            if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS
+            || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+            return FAILURE;
+        } else if(state->type == STRING_CMP_NEQ) {
+            parser_reset(pop3_ptr->orig.hello_state.hello_parser);
+        }
+    }
+
+    buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
 
     return HELLO;
 }
 
 static int write_hello(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
-    
+
+
     size_t max_size;
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
 
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
         pop3_ptr->error_message.message = "Error writing from origin";
-        
+
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
         return FAILURE_WITH_MESSAGE;
     }
-    
     buffer_read_adv(&pop3_ptr->origin_to_client, sent_bytes);
-
-    if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_READ) != SELECTOR_SUCCESS)
-        return FAILURE;
-
+    if(buffer_pending_read(&pop3_ptr->origin_to_client) == 0) {
+        if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS){
+            return FAILURE;
+        }
+        return REQUEST;
+    }
     return HELLO;
 }
 
@@ -477,7 +494,7 @@ static int read_request(struct selector_key* key){
         pop3_ptr->error_message.message = "Error reading from client";
         if (selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
-        
+
         return FAILURE_WITH_MESSAGE;
     }
     buffer_write_adv(&pop3_ptr->client_to_origin, read_chars);
@@ -486,11 +503,11 @@ static int read_request(struct selector_key* key){
         return FAILURE;
 
     return REQUEST;
-    
+
 }
 
 static int write_request(struct selector_key* key){
-    
+
 }
 
 static int write_error_message(struct selector_key *key) {
