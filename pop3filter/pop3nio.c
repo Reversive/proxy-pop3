@@ -445,7 +445,6 @@ static int hello_read(struct selector_key* key) {
     }
 
     for(int i = 0; i < read_chars; i++) {
-        fprintf(stderr, "%c", ptr[i]);
         const struct parser_event* state = parser_feed(pop3_ptr->orig.hello_state.hello_parser, ptr[i]);
         if(state->type == STRING_CMP_EQ) {
             if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS
@@ -479,7 +478,6 @@ static int hello_write(struct selector_key* key) {
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS){
             return FAILURE;
         }
-        fprintf(stderr, "Habilite para leer al client");
         return REQUEST;
     }
     return HELLO;
@@ -523,8 +521,6 @@ static int read_request(struct selector_key* key) {
             pop3_ptr->current_command = CMD_CAPA;
         } else if(state->type == STRING_CMP_NEQ) {
             parser_reset(pop3_ptr->client.request.capa_parser);
-        } else if(state->type == STRING_CMP_NEQ) {
-            parser_reset(pop3_ptr->client.request.capa_parser);
         }
     }
 
@@ -534,15 +530,6 @@ static int read_request(struct selector_key* key) {
 
 }
 
-static int capa_read(struct selector_key* key) {
-    fprintf(stderr, "Estoy por leer capa del origin");
-    return CAPA;
-}
-
-static int capa_write(struct selector_key* key) {
-    return REQUEST;
-}
-
 static int write_request(struct selector_key* key){
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     size_t max_size;
@@ -550,7 +537,7 @@ static int write_request(struct selector_key* key){
 
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
-        pop3_ptr->error_message.message = "Error writing from origin";
+        pop3_ptr->error_message.message = "Error writing to origin";
 
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
@@ -559,12 +546,21 @@ static int write_request(struct selector_key* key){
     }
     buffer_read_adv(&pop3_ptr->client_to_origin, sent_bytes);
     if(buffer_pending_read(&pop3_ptr->client_to_origin) == 0) {
-        if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS){
+        if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->client_fd, OP_NOOP) != SELECTOR_SUCCESS){
             return FAILURE;
         }
         return pop3_ptr->current_command == CMD_CAPA ? CAPA : RESPONSE;
     }
     return RESPONSE;
+}
+
+static int capa_read(struct selector_key* key) {
+    fprintf(stderr, "Estoy por leer capa del origin");
+    return CAPA;
+}
+
+static int capa_write(struct selector_key* key) {
+    return REQUEST;
 }
 
 static int write_error_message(struct selector_key *key) {
