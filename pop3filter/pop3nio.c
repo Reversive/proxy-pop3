@@ -19,14 +19,17 @@ static int              write_error_message(struct selector_key *key);
 static int              resolve_origin(struct selector_key* key);
 static int              done_resolving_origin(struct selector_key* key);
 static int              connection(struct selector_key* key);
-static int              read_hello(struct selector_key* key);
-static int              write_hello(struct selector_key* key);
+static int              hello_read(struct selector_key* key);
+static int              hello_write(struct selector_key* key);
 static int              read_request(struct selector_key* key);
 static int              write_request(struct selector_key* key);
+static void             request_arrival(struct selector_key* key);
 static void             request_departure(struct selector_key* key);
 static int              write_error_message(struct selector_key* key);
 static int              capa_read(struct selector_key* key);
 static int              capa_write(struct selector_key* key);
+static void             hello_arrival(struct selector_key *key);
+static void             hello_departure(struct selector_key *key);
 
 static const unsigned   max_pool = 50;
 static unsigned         pool_size = 0;
@@ -131,8 +134,10 @@ static const struct state_definition handlers[] = {
     },
     {
         .state          = HELLO,
-        .on_read_ready  = read_hello,
-        .on_write_ready = write_hello,
+        .on_read_ready  = hello_read,
+        .on_write_ready = hello_write,
+        .on_arrival     = hello_arrival,
+        .on_departure   = hello_departure
     },
     {
         .state          = CAPA,
@@ -143,6 +148,7 @@ static const struct state_definition handlers[] = {
         .state          = REQUEST,
         .on_read_ready  = read_request,
         .on_write_ready = write_request,
+        .on_arrival     = request_arrival,
         .on_departure   = request_departure
     },
     {
@@ -184,7 +190,7 @@ struct hello_st {
 };
 
 struct capa_st {
-    struct parser*        capa_parser;
+    struct parser*        end_of_multiline_parser;
 };
 
 struct pop3 {
@@ -384,7 +390,6 @@ static int done_resolving_origin(struct selector_key* key) {
 }
 
 
-
 static int connection(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
     int error;
@@ -407,14 +412,25 @@ static int connection(struct selector_key* key) {
     }
         
     pop3_ptr->origin_fd = key->fd;
-    send_error(pop3_ptr->client_fd, "Welcome to the best POP3 server.");
-
     selector_set_interest_key(key, OP_READ);
     return HELLO;
 }
 
+static void hello_arrival(struct selector_key *key) {
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    end_of_line_parser_def = malloc(sizeof(struct parser_definition));
+    struct parser_definition line_parser_aux = parser_utils_strcmpi("\r\n");
+    memcpy(end_of_line_parser_def, &line_parser_aux, sizeof(struct parser_definition));
+    pop3_ptr->orig.hello_state.hello_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
+}
 
-static int read_hello(struct selector_key* key) {
+static void hello_departure(struct selector_key *key) {
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    parser_destroy(pop3_ptr->orig.hello_state.hello_parser);
+    free(end_of_line_parser_def);
+}
+
+static int hello_read(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
 
     size_t max_size;
@@ -434,18 +450,17 @@ static int read_hello(struct selector_key* key) {
         if(state->type == STRING_CMP_EQ) {
             if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS
             || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
-                return FAILURE;
+            return FAILURE;
         } else if(state->type == STRING_CMP_NEQ) {
             parser_reset(pop3_ptr->orig.hello_state.hello_parser);
         }
     }
-
+    
     buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
 
     return HELLO;
 }
-
-static int write_hello(struct selector_key* key) {
+static int hello_write(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
 
     size_t max_size;
@@ -454,7 +469,6 @@ static int write_hello(struct selector_key* key) {
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
         pop3_ptr->error_message.message = "Error writing from origin";
-
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
@@ -470,6 +484,17 @@ static int write_hello(struct selector_key* key) {
     return HELLO;
 }
 
+static void request_arrival(struct selector_key* key) {
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    end_of_multiline_parser_def = malloc(sizeof(struct parser_definition));
+    capa_parser_def = malloc(sizeof(struct parser_definition));
+    struct parser_definition multiline_parser_aux = parser_utils_strcmpi("\r\n.\r\n");
+    struct parser_definition capa_parser_aux = parser_utils_strcmpi("CAPA\r\n");
+    memcpy(end_of_multiline_parser_def, &multiline_parser_aux, sizeof(struct parser_definition));
+    memcpy(capa_parser_def, &capa_parser_aux, sizeof(struct parser_definition));
+    pop3_ptr->orig.capa.end_of_multiline_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
+    pop3_ptr->client.request.capa_parser = parser_init(parser_no_classes(), capa_parser_def);
+}
 
 static void request_departure(struct selector_key* key) {
     
@@ -607,19 +632,6 @@ static struct pop3* pop3_new(int client_fd) {
 
     buffer_init(&pop3_ptr->client_to_origin, BUFFER_SIZE, pop3_ptr->read_buffer);
     buffer_init(&pop3_ptr->origin_to_client, BUFFER_SIZE, pop3_ptr->write_buffer);
-    end_of_line_parser_def = malloc(sizeof(struct parser_definition));
-    end_of_multiline_parser_def = malloc(sizeof(struct parser_definition));
-    capa_parser_def = malloc(sizeof(struct parser_definition));
-    struct parser_definition line_parser_aux = parser_utils_strcmpi("\r\n");
-    struct parser_definition multiline_parser_aux = parser_utils_strcmpi("\r\n.\r\n");
-    struct parser_definition capa_parser_aux = parser_utils_strcmpi("CAPA\r\n");
-    memcpy(end_of_multiline_parser_def, &multiline_parser_aux, sizeof(struct parser_definition));
-    memcpy(end_of_line_parser_def, &line_parser_aux, sizeof(struct parser_definition));
-    memcpy(capa_parser_def, &capa_parser_aux, sizeof(struct parser_definition));
-    pop3_ptr->orig.hello_state.hello_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
-    pop3_ptr->orig.capa.capa_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
-    pop3_ptr->client.request.capa_parser = parser_init(parser_no_classes(), capa_parser_def);
-
     pop3_ptr->references = 1;
     return pop3_ptr;
 }
@@ -655,10 +667,8 @@ static void pop3_block(struct selector_key* key) {
 
 static void pop3_close(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
-    parser_destroy(pop3_ptr->orig.hello_state.hello_parser);
-    parser_destroy(pop3_ptr->orig.capa.capa_parser);
+    parser_destroy(pop3_ptr->orig.capa.end_of_multiline_parser);
     parser_destroy(pop3_ptr->client.request.capa_parser);
-    free(end_of_line_parser_def);
     free(end_of_multiline_parser_def);
     pop3_destroy(pop3_ptr);
 }
