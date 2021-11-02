@@ -3,6 +3,7 @@
 #define ATTACHMENT(key) ( (struct pop3 *)(key)->data)
 #define BUFFER_SIZE 1024
 struct parser_definition *end_of_line_parser_def;
+struct parser_definition *capa_parser_def;
 
 static void             pop3_read(struct selector_key* key);
 static void             pop3_write(struct selector_key* key);
@@ -101,17 +102,59 @@ enum pop3_state {
        FAILURE
 };
 
+static const struct state_definition handlers[] = {
+    {
+        .state = RESOLVE_ORIGIN,
+        .on_write_ready = resolve_origin,
+        .on_block_ready = done_resolving_origin
+    },
+    {
+        .state = CONNECT,
+        .on_write_ready = connection,
+    },
+    {
+        .state = HELLO,
+        .on_read_ready  = read_hello,
+        .on_write_ready = write_hello,
+        .on_arrival     = hello_arrival,
+        .on_departure   = hello_departure
+    },
+    {
+        .state = CAPA,
+    },
+    {
+        .state = REQUEST,
+        .on_arrival     = request_arrival,
+        .on_read_ready  = read_request,
+        .on_write_ready = write_request,
+        .on_departure   = request_departure
+    },
+    {
+        .state = RESPONSE,
+    },
+    {
+        .state = TRANSFORM,
+    },
+    {
+        .state = DONE,
+    },
+    {
+        .state = FAILURE_WITH_MESSAGE,
+        .on_write_ready = write_error_message
+    },
+    {
+        .state = FAILURE,
+    }
+
+};
 
 struct request_st {
-    t_buffer* rb, * wb;
-    //struct request_parser   parser;
-    uint8_t               method;
+    struct parser*  capa_parser;
 };
 
 struct response_st {
     t_buffer* rb, * wb;
-    //struct response_parser   parser;
-    uint8_t               method;
+    //struct request_parser   parser;
 };
 
 struct message_packet {
@@ -126,7 +169,6 @@ struct hello_st {
 };
 
 struct pop3 {
-
     int                     client_fd;
     struct sockaddr_storage client_address;
     socklen_t               client_address_len;
@@ -134,8 +176,6 @@ struct pop3 {
     struct addrinfo*        origin_resolution;
     struct addrinfo*        current_res;
     struct message_packet   error_message;
-
-    
 
     struct sockaddr_storage origin_address;
     socklen_t               origin_address_len;
@@ -354,7 +394,7 @@ static int connection(struct selector_key* key) {
     return HELLO;
 }
 
-void on_hello_arrival(struct selector_key* key){
+void hello_arrival(struct selector_key* key){
     struct pop3* pop3_ptr = ATTACHMENT(key);
     end_of_line_parser_def = malloc(sizeof(struct parser_definition));
     struct parser_definition aux = parser_utils_strcmpi("\r\n");
@@ -362,7 +402,7 @@ void on_hello_arrival(struct selector_key* key){
     pop3_ptr->orig.hello_state.hello_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
 }
 
-void on_hello_departure(struct selector_key* key){
+void hello_departure(struct selector_key* key){
     struct pop3* pop3_ptr = ATTACHMENT(key);
     parser_destroy(pop3_ptr->orig.hello_state.hello_parser);
     free(end_of_line_parser_def);
@@ -382,8 +422,6 @@ static int read_hello(struct selector_key* key) {
         return FAILURE_WITH_MESSAGE;
     }
     buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
-    //const struct parser_event* state = parser_feed(pop_ptr->end_of_line_parser);
-
 
     if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
         return FAILURE;
@@ -393,11 +431,14 @@ static int read_hello(struct selector_key* key) {
 
 static int write_hello(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
+    
     size_t max_size;
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
+
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
         pop3_ptr->error_message.message = "Error writing from origin";
+        
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
@@ -410,6 +451,46 @@ static int write_hello(struct selector_key* key) {
         return FAILURE;
 
     return HELLO;
+}
+
+static void request_arrival(struct selector_key* key) { //TODO ver de como tener esto ya creado
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    capa_parser_def = malloc(sizeof(struct parser_definition));
+    //TODO agregar todos los comandos
+    struct parser_definition aux = parser_utils_strcmpi("CAPA\r\n");
+    capa_parser_def = &aux;
+    pop3_ptr->client.request.capa_parser = parser_init(parser_no_classes(), capa_parser_def);
+}
+
+static void request_departure(struct selector_key* key) {
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    parser_destroy(pop3_ptr->client.request.capa_parser);
+    free(end_of_line_parser_def);
+}
+
+static int read_request(struct selector_key* key){
+    struct pop3 *pop3_ptr = ATTACHMENT(key);
+    size_t max_size;
+    uint8_t* ptr = buffer_write_ptr(&pop3_ptr->client_to_origin, &max_size);
+    ssize_t read_chars = recv(pop3_ptr->client_fd, ptr, max_size, 0);
+    if (read_chars <= 0) {
+        pop3_ptr->error_message.message = "Error reading from client";
+        if (selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE;
+        
+        return FAILURE_WITH_MESSAGE;
+    }
+    buffer_write_adv(&pop3_ptr->client_to_origin, read_chars);
+
+    if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
+        return FAILURE;
+
+    return REQUEST;
+    
+}
+
+static int write_request(struct selector_key* key){
+    
 }
 
 static int write_error_message(struct selector_key *key) {
@@ -429,48 +510,6 @@ static int write_error_message(struct selector_key *key) {
     pop3_ptr->error_message.bytes_sent += bytes_sent;
     return FAILURE_WITH_MESSAGE;
 }
-
-static const struct state_definition handlers[] = {
-    {
-        .state = RESOLVE_ORIGIN,
-        .on_write_ready = resolve_origin,
-        .on_block_ready = done_resolving_origin
-    },
-    {
-        .state = CONNECT,
-        .on_write_ready = connection,
-    },
-    {
-        .state = HELLO,
-        .on_read_ready  = read_hello,
-        .on_write_ready = write_hello,
-        .on_arrival     = on_hello_arrival,
-        .on_departure   = on_hello_departure
-    },
-    {
-        .state = CAPA,
-    },
-    {
-        .state = REQUEST,
-    },
-    {
-        .state = RESPONSE,
-    },
-    {
-        .state = TRANSFORM,
-    },
-    {
-        .state = DONE,
-    },
-    {
-        .state = FAILURE_WITH_MESSAGE,
-        .on_write_ready = write_error_message
-    },
-    {
-        .state = FAILURE,
-    }
-
-};
 
 void pop3_passive_accept(struct selector_key* key) {
     struct sockaddr_storage client_address;
@@ -500,6 +539,10 @@ fail:
     }
     pop3_destroy(state);
 }
+
+//
+//      POP3 METHODS
+//
 
 
 static struct pop3* pop3_new(int client_fd) {
