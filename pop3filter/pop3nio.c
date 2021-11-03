@@ -197,6 +197,7 @@ struct hello_st {
 struct capa_st {
     struct parser*          end_of_multiline_parser;
     struct parser*          pipelining_parser;
+    bool                    supports_pipelining;
 };
 
 struct pop3 {
@@ -560,11 +561,16 @@ static int write_request(struct selector_key* key){
 }
 
 static void capa_arrival(struct selector_key* key) {
-
+    struct pop3 *pop3_ptr = ATTACHMENT(key);
+    pipelining_parser_def = malloc(sizeof(struct parser_definition));
+    struct parser_definition pipelining_parser_aux = parser_utils_strcmpi("PIPELINING");
+    memcpy(pipelining_parser_def, &pipelining_parser_aux, sizeof(struct parser_definition));
+    pop3_ptr->orig.capa.pipelining_parser = parser_init(parser_no_classes(), pipelining_parser_def);
+    
 }
 
 static void capa_departure(struct selector_key* key) {
-
+    
 }
 
 static int capa_read(struct selector_key* key) {
@@ -581,18 +587,27 @@ static int capa_read(struct selector_key* key) {
     }
 
     for(int i = 0; i < read_chars; i++) {
-        const struct parser_event* state = parser_feed(pop3_ptr->orig.capa.end_of_multiline_parser, ptr[i]);
-        if(state->type == STRING_CMP_EQ) { // \r\n.\r\n
-            // if(strstr((char*)ptr, "PIPELINING") == NULL) {//TODO hacer chequeo de espacio en buffer
-            //     fprintf(stderr, "entre");
-            //     strcpy((char*) (ptr + i - 2), "PIPELINING\r\n.\r\n");
-            //     read_chars += 13;   
-            // }
-            
+        if(!pop3_ptr->orig.capa.supports_pipelining) {
+            const struct parser_event* pipelining_state = parser_feed(pop3_ptr->orig.capa.pipelining_parser, ptr[i]);
+            if(pipelining_state->type == STRING_CMP_EQ) {
+                pop3_ptr->orig.capa.supports_pipelining = true;
+            } else if(pipelining_state->type == STRING_CMP_NEQ) {
+                parser_reset(pop3_ptr->orig.capa.pipelining_parser);
+            }
+        }
+
+        const struct parser_event* end_state = parser_feed(pop3_ptr->orig.capa.end_of_multiline_parser, ptr[i]);
+        
+        if(end_state->type == STRING_CMP_EQ) { // \r\n.\r\n
+            if(!pop3_ptr->orig.capa.supports_pipelining) {
+                strcpy((char*)ptr+i-2, "PIPELINING\r\n.\r\n");
+                read_chars += 13;
+            }
             if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS
                 || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
                 return FAILURE;
-        } else if(state->type == STRING_CMP_NEQ) {
+            break;
+        } else if(end_state->type == STRING_CMP_NEQ) {
             parser_reset(pop3_ptr->orig.capa.end_of_multiline_parser);
         }
     }
@@ -690,6 +705,7 @@ static struct pop3* pop3_new(int client_fd) {
     pop3_ptr->stm.initial = RESOLVE_ORIGIN;
     pop3_ptr->stm.max_state = FAILURE;
     pop3_ptr->stm.states = handlers;
+    pop3_ptr->orig.capa.supports_pipelining = false;
     stm_init(&pop3_ptr->stm);
 
     buffer_init(&pop3_ptr->client_to_origin, BUFFER_SIZE, pop3_ptr->read_buffer);
