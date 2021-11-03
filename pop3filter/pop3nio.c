@@ -6,6 +6,7 @@
 struct parser_definition *end_of_line_parser_def;
 struct parser_definition *end_of_multiline_parser_def;
 struct parser_definition *capa_parser_def;
+struct parser_definition *pipelining_parser_def;
 
 static void             pop3_read(struct selector_key* key);
 static void             pop3_write(struct selector_key* key);
@@ -28,6 +29,8 @@ static void             request_departure(struct selector_key* key);
 static int              write_error_message(struct selector_key* key);
 static int              capa_read(struct selector_key* key);
 static int              capa_write(struct selector_key* key);
+static void             capa_arrival(struct selector_key *key);
+static void             capa_departure(struct selector_key *key);
 static void             hello_arrival(struct selector_key *key);
 static void             hello_departure(struct selector_key *key);
 
@@ -141,6 +144,8 @@ static const struct state_definition handlers[] = {
     },
     {
         .state          = CAPA,
+        .on_arrival     = capa_arrival,
+        .on_departure   = capa_departure,
         .on_read_ready  = capa_read,
         .on_write_ready = capa_write,
     },
@@ -186,11 +191,12 @@ struct message_packet {
 };
 
 struct hello_st {
-    struct parser*        hello_parser;
+    struct parser*          hello_parser;
 };
 
 struct capa_st {
-    struct parser*        end_of_multiline_parser;
+    struct parser*          end_of_multiline_parser;
+    struct parser*          pipelining_parser;
 };
 
 struct pop3 {
@@ -449,7 +455,7 @@ static int hello_read(struct selector_key* key) {
         if(state->type == STRING_CMP_EQ) {
             if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS
             || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
-            return FAILURE;
+                return FAILURE;
         } else if(state->type == STRING_CMP_NEQ) {
             parser_reset(pop3_ptr->orig.hello_state.hello_parser);
         }
@@ -516,7 +522,7 @@ static int read_request(struct selector_key* key) {
         const struct parser_event* state = parser_feed(pop3_ptr->client.request.capa_parser, ptr[i]);
         if(state->type == STRING_CMP_EQ) {
             if(selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS
-            || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+                || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
                 return FAILURE;
             pop3_ptr->current_command = CMD_CAPA;
         } else if(state->type == STRING_CMP_NEQ) {
@@ -527,7 +533,6 @@ static int read_request(struct selector_key* key) {
     buffer_write_adv(&pop3_ptr->client_to_origin, read_chars);
     
     return REQUEST;
-
 }
 
 static int write_request(struct selector_key* key){
@@ -554,13 +559,71 @@ static int write_request(struct selector_key* key){
     return RESPONSE;
 }
 
+static void capa_arrival(struct selector_key* key) {
+
+}
+
+static void capa_departure(struct selector_key* key) {
+
+}
+
 static int capa_read(struct selector_key* key) {
-    fprintf(stderr, "Estoy por leer capa del origin");
+    struct pop3 *pop3_ptr = ATTACHMENT(key);
+    size_t max_size;
+    uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
+    ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
+    if (read_chars <= 0) {
+        pop3_ptr->error_message.message = "Error reading from origin";
+        if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE;
+        
+        return FAILURE_WITH_MESSAGE;
+    }
+
+    for(int i = 0; i < read_chars; i++) {
+        const struct parser_event* state = parser_feed(pop3_ptr->orig.capa.end_of_multiline_parser, ptr[i]);
+        if(state->type == STRING_CMP_EQ) { // \r\n.\r\n
+            // if(strstr((char*)ptr, "PIPELINING") == NULL) {//TODO hacer chequeo de espacio en buffer
+            //     fprintf(stderr, "entre");
+            //     strcpy((char*) (ptr + i - 2), "PIPELINING\r\n.\r\n");
+            //     read_chars += 13;   
+            // }
+            
+            if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS
+                || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+                return FAILURE;
+        } else if(state->type == STRING_CMP_NEQ) {
+            parser_reset(pop3_ptr->orig.capa.end_of_multiline_parser);
+        }
+    }
+
+    buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);    
     return CAPA;
 }
 
 static int capa_write(struct selector_key* key) {
-    return REQUEST;
+    struct pop3 *pop3_ptr = ATTACHMENT(key);
+    size_t max_size;
+    uint8_t* ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
+
+    ssize_t sent_bytes;
+    if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
+        pop3_ptr->error_message.message = "Error writing to origin";
+
+        if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE;
+        
+        return FAILURE_WITH_MESSAGE;
+    }
+    buffer_read_adv(&pop3_ptr->origin_to_client, sent_bytes);
+    if(buffer_pending_read(&pop3_ptr->origin_to_client) == 0) {
+        if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS 
+            || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS){
+            return FAILURE;
+        }
+        return REQUEST;
+    }
+    return CAPA;
 }
 
 static int write_error_message(struct selector_key *key) {

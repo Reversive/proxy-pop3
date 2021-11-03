@@ -9,7 +9,6 @@ static void sigterm_handler(const int signal) {
     done = true;
 }
 
-// TODO: Cambiar fprintf por logging
 int main(int argc, char *argv[]) {
     proxy_config = parse_options(argc, argv);
     close(STDIN);
