@@ -2,11 +2,59 @@
 
 #define ATTACHMENT(key) ( (struct pop3 *)(key)->data)
 #define BUFFER_SIZE 1024
+#define COMMANDS 12
 
 struct parser_definition *end_of_line_parser_def;
 struct parser_definition *end_of_multiline_parser_def;
 struct parser_definition *capa_parser_def;
 struct parser_definition *pipelining_parser_def;
+
+char* command_strings[] = { "CAPA", "USER", "PASS", "LIST", "RETR", "DELE", "TOP", "UIDL", "NOOP", "QUIT", "RSET", "STAT"};
+struct parser_definition *defs[COMMANDS];
+
+
+/*
+
+
+init_parser_defs(tcp_parsers, tcp_strings, TCP_COMMANDS);
+
+void init_parser_defs(struct parser_definition defs[], char** strings, int size)
+{
+    for (int i = 0; i < size; i++)
+        defs[i] = parser_utils_strcmpi(strings[i]);
+}
+
+void init_parsers(ptr_parser parsers[], struct parser_definition defs[], int size)
+{
+    for (int i = 0; i < size; i++)
+    {
+        parsers[i] = parser_init(parser_no_classes(), &defs[i]);
+    }
+}
+
+
+void reset_parsers(ptr_parser parsers[], int* may_match, int size)
+{
+    for (int i = 0; i < size; i++)
+    {
+        parser_reset(parsers[i]);
+        may_match[i] = 1;
+    }
+}
+
+//destrooy de def
+void parser_utils_strcmpi_destroy(const struct parser_definition* p) {
+    free((void*)p->states[0]);
+    free((void*)p->states);
+    free((void*)p->states_n);
+}
+
+for (int curr_parser = 0; curr_parser < COMMANDS; curr_parser++)
+						parser_destroy(client_socket[curr_client].parsers[curr_parser]);
+
+
+*/
+
 
 static void             pop3_read(struct selector_key* key);
 static void             pop3_write(struct selector_key* key);
@@ -121,8 +169,8 @@ enum pop3_state {
        FAILURE
 };
 
-enum current_command {CMD_CAPA = 0, };
-char* tcp_strings[] = { "CAPA\r\n",};
+enum current_command {CMD_CAPA = 0, CMD_USER, CMD_PASS, CMD_LIST, CMD_RETR, CMD_DELE, CMD_TOP, CMD_UIDL, CMD_NOOP, CMD_QUIT, CMD_RSET, CMD_STAT};
+char* tcp_strings[] = { "CAPA\r\n"};
 
 
 static const struct state_definition handlers[] = {
@@ -208,12 +256,15 @@ struct pop3 {
     struct addrinfo*        origin_resolution;
     struct addrinfo*        current_res;
     struct message_packet   error_message;
+    
 
     struct sockaddr_storage origin_address;
     socklen_t               origin_address_len;
     int                     origin_domain;
     fd                      origin_fd;
     enum current_command    current_command;
+
+    //ptr_parser parsers[COMMANDS];
 
     union {
         struct request_st   request;
@@ -801,4 +852,3 @@ void pop3_pool_destroy(void) {
         free(s);
     }
 }
-
