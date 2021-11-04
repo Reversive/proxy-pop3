@@ -35,6 +35,8 @@ int main(int argc, char *argv[]) {
 		goto finally;
 	}
 
+    init_parser_defs();
+
 	int server = -1;
 	for (struct addrinfo* addr = server_address; addr != NULL && server == -1; addr = addr->ai_next) {
 		errno = 0;
