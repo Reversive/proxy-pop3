@@ -293,7 +293,7 @@ static bool multi_arguments(struct pop3 * pop3_ptr) {
 
 t_command command_list[] = {{"CAPA", multi_true}, {"USER", multi_false}, {"PASS", multi_false}, {"LIST", multi_no_arguments}, 
     {"RETR", multi_arguments}, {"DELE", multi_false}, {"TOP", multi_arguments}, {"UIDL", multi_no_arguments}, 
-    {"NOOP", multi_false}, {"QUIT", multi_false}, {"RSET", multi_false}};
+    {"NOOP", multi_false}, {"QUIT", multi_false}, {"RSET", multi_false}, {"STAT", multi_false}};
 
 
 // char* command_strings[] = { "CAPA", "USER", "PASS", "LIST", "RETR", "DELE", "TOP", "UIDL", "NOOP", "QUIT", "RSET", "STAT"};
