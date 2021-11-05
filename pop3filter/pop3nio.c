@@ -203,6 +203,7 @@ struct request_st {
 struct response_st {
     t_buffer* rb, * wb;
     ptr_parser end_of_line_parser;
+    int current_command;
     //struct request_parser   parser;
 };
 
@@ -242,6 +243,8 @@ struct pop3 {
     bool                    has_args;
     ptr_parser              parsers[COMMANDS];
 
+    command_queue           commands_left;
+
     union {
         struct request_st   request;
     } client;
@@ -252,15 +255,15 @@ struct pop3 {
         struct hello_st     hello_state;
     } orig;
 
-    uint8_t read_buffer[BUFFER_SIZE];
-    uint8_t write_buffer[BUFFER_SIZE];
+    uint8_t                 read_buffer[BUFFER_SIZE];
+    uint8_t                 write_buffer[BUFFER_SIZE];
 
-    t_buffer client_to_origin;
-    t_buffer origin_to_client;
+    t_buffer                client_to_origin;
+    t_buffer                origin_to_client;
 
     struct state_machine    stm;
     unsigned                references;
-    struct pop3* next;
+    struct pop3*            next;
 };
 
 static const struct fd_handler pop3_handler = {
@@ -535,7 +538,9 @@ static void hello_arrival(struct selector_key *key) {
 }
 
 static void hello_departure(struct selector_key *key) {
-    parser_destroy(ATTACHMENT(key)->orig.hello_state.hello_parser);
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    parser_destroy(pop3_ptr->orig.hello_state.hello_parser);
+    pop3_ptr->commands_left = new_command_queue();
 }
 
 static int hello_read(struct selector_key* key) {
@@ -544,7 +549,7 @@ static int hello_read(struct selector_key* key) {
     size_t max_size;
     uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
     ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
-    if (read_chars <= 0) {
+    if (read_chars <= 0) { 
         pop3_ptr->error_message.message = "Error reading from origin";
         if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
@@ -613,7 +618,6 @@ static int request_read(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     size_t max_size;
     uint8_t* ptr = buffer_write_ptr(&pop3_ptr->client_to_origin, &max_size);
-    //uint8_t * ptr = malloc(BUFFER_SIZE);
     
     ssize_t read_chars = recv(pop3_ptr->client_fd, ptr, max_size, 0);
 
@@ -625,16 +629,30 @@ static int request_read(struct selector_key* key) {
         return FAILURE_WITH_MESSAGE;
     }
 
+    int last_command_end = 0;
+
     for(int i = 0; i < read_chars; i++) { // TODO: PIPELINING
         const struct parser_event* end_of_line_state = parser_feed(pop3_ptr->client.request.end_of_line_parser, ptr[i]);
         
         if (end_of_line_state->type == STRING_CMP_EQ) {
+            /*
             if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
                 return FAILURE;
-    
+            */
+            command_node node = malloc(sizeof(t_node));
+
+            node->command = pop3_ptr->current_command;
+            node->buff = ptr + last_command_end + 1;
+            node->command_len = i + 1 - last_command_end;
+            node->has_args = pop3_ptr->has_args;
+            enqueue(pop3_ptr->commands_left, node);
+
+            pop3_ptr->has_args = false;
+            last_command_end = i + 1;
             reset_parsers(pop3_ptr);
+            pop3_ptr->current_command = -1;
             parser_reset(pop3_ptr->client.request.end_of_line_parser);
-            break;
+            continue;
         } else if (end_of_line_state->type == STRING_CMP_NEQ) {
             parser_reset(pop3_ptr->client.request.end_of_line_parser);
         }
@@ -647,9 +665,7 @@ static int request_read(struct selector_key* key) {
                     if(curr_command_state->type == STRING_CMP_EQ) {
                         // Matchee con un comando, me pueden llegar parametros o no
                         pop3_ptr->current_command = command;
-                        pop3_ptr->current_command_index += i;
-
-                        
+                        pop3_ptr->current_command_index += i;                        
                     } else if(curr_command_state->type == STRING_CMP_NEQ) {
                         pop3_ptr->client.request.parser_states[command] = 0;
                     } 
@@ -659,12 +675,17 @@ static int request_read(struct selector_key* key) {
             pop3_ptr->has_args = true;
         }
     }
-
     if(pop3_ptr->current_command == -1) {
         pop3_ptr->current_command_index += read_chars;
     }
     
     buffer_write_adv(&pop3_ptr->client_to_origin, read_chars);
+
+    if(!is_empty(pop3_ptr->commands_left)){
+        if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE;
+    }
+    
     return REQUEST;
 }
 
@@ -673,25 +694,33 @@ static int request_write(struct selector_key* key){
     size_t max_size;
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->client_to_origin, &max_size);
 
-    ssize_t sent_bytes;
-    if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
-        pop3_ptr->error_message.message = "Error writing to origin";
 
+    command_node node = peek(pop3_ptr->commands_left);
+    
+    ssize_t sent_bytes;
+    fprintf(stderr, "\nQuiero leer %d, hay disponibles %ld\n", node->command_len, max_size);
+    if( (sent_bytes = send(key->fd, ptr, node->command_len, 0)) == -1) {
+        pop3_ptr->error_message.message = "Error writing to origin";
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
         return FAILURE_WITH_MESSAGE;
     }
     buffer_read_adv(&pop3_ptr->client_to_origin, sent_bytes);
-    if(buffer_pending_read(&pop3_ptr->client_to_origin) == 0) {
+    if (sent_bytes == node->command_len) {
+        dequeue(pop3_ptr->commands_left);
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->client_fd, OP_NOOP) != SELECTOR_SUCCESS){
             return FAILURE;
         }
-        return pop3_ptr->current_command == CMD_CAPA ? CAPA : RESPONSE;
+        pop3_ptr->orig.response.current_command = node->command;
+        free(node);
+        return pop3_ptr->orig.response.current_command == CMD_CAPA ? CAPA : RESPONSE;
     }
+
+    node->buff += sent_bytes;
+    node->command_len -=  sent_bytes;
     return REQUEST;
 }
-
 
 static void response_arrival(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
@@ -713,8 +742,10 @@ static int response_read(struct selector_key* key) {
     }
     
     if (pop3_ptr->orig.response.end_of_line_parser == NULL) {
-        fprintf(stderr, "estoy entrando comando %d \n", pop3_ptr->current_command);
-        if(command_list[pop3_ptr->current_command].is_multi(pop3_ptr) && ptr[0] == '+') {
+        fprintf(stderr, "estoy entrando comando %d \n", pop3_ptr->orig.response.current_command);
+        if(pop3_ptr->orig.response.current_command != -1 && 
+            command_list[pop3_ptr->orig.response.current_command].is_multi(pop3_ptr) && ptr[0] == '+') {
+                
             pop3_ptr->orig.response.end_of_line_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
         } else {
             pop3_ptr->orig.response.end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
@@ -756,14 +787,26 @@ static int response_write(struct selector_key* key) {
         return FAILURE_WITH_MESSAGE;
     }
     buffer_read_adv(&pop3_ptr->origin_to_client, sent_bytes);
-    if(buffer_pending_read(&pop3_ptr->origin_to_client) == 0) {
+    if (buffer_can_read(&pop3_ptr->origin_to_client))
+        return RESPONSE;
+
+    if(is_empty(pop3_ptr->commands_left)) {
+        fprintf(stderr, "Vuelvo para lectura");
+
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS 
             || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS)
             return FAILURE;
         
         return REQUEST;
     }
-    return RESPONSE;
+
+    fprintf(stderr, "Vuelvo para escritura");
+
+    if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS 
+            || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE;
+
+    return REQUEST;
 }
 
 static void capa_arrival(struct selector_key* key) {

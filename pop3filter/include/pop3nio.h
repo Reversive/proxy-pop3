@@ -20,6 +20,8 @@
 #include "../utils/include/logger.h"
 #include "../utils/include/parser.h"
 #include "../utils/include/parser_utils.h"
+#include "../utils/include/queue.h"
+
 #define N(x) (sizeof(x)/sizeof((x)[0]))
 
 void pop3_passive_accept(struct selector_key *key);
