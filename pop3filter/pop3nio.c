@@ -238,12 +238,12 @@ struct pop3 {
     int                     origin_domain;
     fd                      origin_fd;
     int                     current_command;
-    size_t                  current_command_index;
     bool                    may_multi;
     bool                    has_args;
     ptr_parser              parsers[COMMANDS];
 
     command_queue           commands_left;
+    ssize_t                 unmatched_len;
 
     union {
         struct request_st   request;
@@ -601,7 +601,6 @@ static void request_arrival(struct selector_key* key) {
     pop3_ptr->orig.capa.end_of_multiline_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
     pop3_ptr->client.request.end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
     pop3_ptr->current_command = -1;
-    pop3_ptr->current_command_index = 0;
     for (int i = 0; i < COMMANDS; i++) {
          pop3_ptr->client.request.parser_states[i] = 1;
     }
@@ -631,26 +630,28 @@ static int request_read(struct selector_key* key) {
 
     int last_command_end = 0;
 
-    for(int i = 0; i < read_chars; i++) { // TODO: PIPELINING
+    //bool last_command_ended = false;
+
+    for(int i = 0; i < read_chars; i++) {
         const struct parser_event* end_of_line_state = parser_feed(pop3_ptr->client.request.end_of_line_parser, ptr[i]);
         
         if (end_of_line_state->type == STRING_CMP_EQ) {
-            /*
-            if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
-                return FAILURE;
-            */
             command_node node = malloc(sizeof(t_node));
 
             node->command = pop3_ptr->current_command;
-            node->buff = ptr + last_command_end + 1;
-            node->command_len = i + 1 - last_command_end;
+            //node->buff = ptr + last_command_end + 1; //COMANDO\r\nCOMA|NDO\r\n
+            node->command_len = i + 1 - last_command_end + pop3_ptr->unmatched_len;
             node->has_args = pop3_ptr->has_args;
+            
             enqueue(pop3_ptr->commands_left, node);
 
             pop3_ptr->has_args = false;
             last_command_end = i + 1;
+
             reset_parsers(pop3_ptr);
+            pop3_ptr->unmatched_len = 0;
             pop3_ptr->current_command = -1;
+            //last_command_ended = true;
             parser_reset(pop3_ptr->client.request.end_of_line_parser);
             continue;
         } else if (end_of_line_state->type == STRING_CMP_NEQ) {
@@ -665,7 +666,7 @@ static int request_read(struct selector_key* key) {
                     if(curr_command_state->type == STRING_CMP_EQ) {
                         // Matchee con un comando, me pueden llegar parametros o no
                         pop3_ptr->current_command = command;
-                        pop3_ptr->current_command_index += i;                        
+                        //last_command_ended = false;               
                     } else if(curr_command_state->type == STRING_CMP_NEQ) {
                         pop3_ptr->client.request.parser_states[command] = 0;
                     } 
@@ -675,9 +676,10 @@ static int request_read(struct selector_key* key) {
             pop3_ptr->has_args = true;
         }
     }
-    if(pop3_ptr->current_command == -1) {
-        pop3_ptr->current_command_index += read_chars;
-    }
+
+    //if (!last_command_ended || pop3_ptr->current_command == -1) {
+        pop3_ptr->unmatched_len = read_chars - last_command_end;//COM\r\nCO
+    //}
     
     buffer_write_adv(&pop3_ptr->client_to_origin, read_chars);
 
@@ -698,7 +700,6 @@ static int request_write(struct selector_key* key){
     command_node node = peek(pop3_ptr->commands_left);
     
     ssize_t sent_bytes;
-    fprintf(stderr, "\nQuiero leer %d, hay disponibles %ld\n", node->command_len, max_size);
     if( (sent_bytes = send(key->fd, ptr, node->command_len, 0)) == -1) {
         pop3_ptr->error_message.message = "Error writing to origin";
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
@@ -717,7 +718,6 @@ static int request_write(struct selector_key* key){
         return pop3_ptr->orig.response.current_command == CMD_CAPA ? CAPA : RESPONSE;
     }
 
-    node->buff += sent_bytes;
     node->command_len -=  sent_bytes;
     return REQUEST;
 }
@@ -791,7 +791,6 @@ static int response_write(struct selector_key* key) {
         return RESPONSE;
 
     if(is_empty(pop3_ptr->commands_left)) {
-        fprintf(stderr, "Vuelvo para lectura");
 
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS 
             || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS)
@@ -800,7 +799,6 @@ static int response_write(struct selector_key* key) {
         return REQUEST;
     }
 
-    fprintf(stderr, "Vuelvo para escritura");
 
     if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS 
             || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
