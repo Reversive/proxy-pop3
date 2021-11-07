@@ -40,8 +40,6 @@ static int              hello_read(struct selector_key* key);
 static int              hello_write(struct selector_key* key);
 static int              request_read(struct selector_key* key);
 static int              request_write(struct selector_key* key);
-static void             request_arrival(struct selector_key* key);
-static void             request_departure(struct selector_key* key);
 static int              write_error_message(struct selector_key* key);
 static int              capa_read(struct selector_key* key);
 static int              capa_write(struct selector_key* key);
@@ -169,9 +167,7 @@ static const struct state_definition handlers[] = {
     {
         .state          = REQUEST,
         .on_read_ready  = request_read,
-        .on_write_ready = request_write,
-        .on_arrival     = request_arrival,
-        .on_departure   = request_departure
+        .on_write_ready = request_write
     },
     {
         .state          = RESPONSE,
@@ -298,10 +294,6 @@ t_command command_list[] = {{"CAPA", multi_true}, {"USER", multi_false}, {"PASS"
     {"RETR", multi_arguments}, {"DELE", multi_false}, {"TOP", multi_arguments}, {"UIDL", multi_no_arguments}, 
     {"NOOP", multi_false}, {"QUIT", multi_false}, {"RSET", multi_false}, {"STAT", multi_false}};
 
-
-// char* command_strings[] = { "CAPA", "USER", "PASS", "LIST", "RETR", "DELE", "TOP", "UIDL", "NOOP", "QUIT", "RSET", "STAT"};
-// int can_be_multi[] = { 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1};
-
 struct parser_definition *defs[COMMANDS];
 
 
@@ -323,6 +315,15 @@ void init_parser_defs() {
     pipelining_parser_def = malloc(sizeof(struct parser_definition));
     struct parser_definition pipelining_parser_aux = parser_utils_strcmpi("PIPELINING");
     memcpy(pipelining_parser_def, &pipelining_parser_aux, sizeof(struct parser_definition));
+}
+
+void destroy_parser_defs() {
+    for (int i = 0; i < COMMANDS; i++) 
+        free(defs[i]);
+        
+    free(end_of_line_parser_def);
+    free(end_of_multiline_parser_def);
+    free(pipelining_parser_def);
 }
 
 void init_parsers(struct pop3* pop3_ptr){
@@ -541,6 +542,15 @@ static void hello_departure(struct selector_key *key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
     parser_destroy(pop3_ptr->orig.hello_state.hello_parser);
     pop3_ptr->commands_left = new_command_queue();
+
+    
+    pop3_ptr->orig.capa.end_of_multiline_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
+    pop3_ptr->client.request.end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
+    pop3_ptr->current_command = -1;
+    for (int i = 0; i < COMMANDS; i++)
+         pop3_ptr->client.request.parser_states[i] = 1;
+    
+    pop3_ptr->may_multi = true;
 }
 
 static int hello_read(struct selector_key* key) {
@@ -596,22 +606,6 @@ static int hello_write(struct selector_key* key) {
     return HELLO;
 }
 
-static void request_arrival(struct selector_key* key) {
-    struct pop3* pop3_ptr = ATTACHMENT(key);
-    pop3_ptr->orig.capa.end_of_multiline_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
-    pop3_ptr->client.request.end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
-    pop3_ptr->current_command = -1;
-    for (int i = 0; i < COMMANDS; i++) {
-         pop3_ptr->client.request.parser_states[i] = 1;
-    }
-    pop3_ptr->may_multi = true;
-}
-
-static void request_departure(struct selector_key* key) {
-    
-}
-
-
 
 static int request_read(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
@@ -630,8 +624,6 @@ static int request_read(struct selector_key* key) {
 
     int last_command_end = 0;
 
-    //bool last_command_ended = false;
-
     for(int i = 0; i < read_chars; i++) {
         const struct parser_event* end_of_line_state = parser_feed(pop3_ptr->client.request.end_of_line_parser, ptr[i]);
         
@@ -639,7 +631,6 @@ static int request_read(struct selector_key* key) {
             command_node node = malloc(sizeof(t_node));
 
             node->command = pop3_ptr->current_command;
-            //node->buff = ptr + last_command_end + 1; //COMANDO\r\nCOMA|NDO\r\n
             node->command_len = i + 1 - last_command_end + pop3_ptr->unmatched_len;
             node->has_args = pop3_ptr->has_args;
             
@@ -651,7 +642,6 @@ static int request_read(struct selector_key* key) {
             reset_parsers(pop3_ptr);
             pop3_ptr->unmatched_len = 0;
             pop3_ptr->current_command = -1;
-            //last_command_ended = true;
             parser_reset(pop3_ptr->client.request.end_of_line_parser);
             continue;
         } else if (end_of_line_state->type == STRING_CMP_NEQ) {
@@ -666,7 +656,6 @@ static int request_read(struct selector_key* key) {
                     if(curr_command_state->type == STRING_CMP_EQ) {
                         // Matchee con un comando, me pueden llegar parametros o no
                         pop3_ptr->current_command = command;
-                        //last_command_ended = false;               
                     } else if(curr_command_state->type == STRING_CMP_NEQ) {
                         pop3_ptr->client.request.parser_states[command] = 0;
                     } 
@@ -677,9 +666,7 @@ static int request_read(struct selector_key* key) {
         }
     }
 
-    //if (!last_command_ended || pop3_ptr->current_command == -1) {
-        pop3_ptr->unmatched_len = read_chars - last_command_end;//COM\r\nCO
-    //}
+    pop3_ptr->unmatched_len = read_chars - last_command_end;
     
     buffer_write_adv(&pop3_ptr->client_to_origin, read_chars);
 
@@ -992,9 +979,10 @@ static void pop3_block(struct selector_key* key) {
 }
 
 static void pop3_close(struct selector_key* key) {
+    fprintf(stderr, "Entre al pop3_close\n");
     struct pop3* pop3_ptr = ATTACHMENT(key);
     parser_destroy(pop3_ptr->orig.capa.end_of_multiline_parser);
-    free(end_of_multiline_parser_def);
+    pop3_ptr->orig.capa.end_of_multiline_parser = NULL;
     pop3_destroy(pop3_ptr);
 }
 

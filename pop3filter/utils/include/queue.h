@@ -5,7 +5,6 @@
 
 typedef struct t_node {
     int command;
-    uint8_t * buff;
     uint8_t command_len;
     bool has_args;
     struct t_node * next;

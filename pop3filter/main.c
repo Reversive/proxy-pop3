@@ -143,6 +143,7 @@ finally:
             perror(error_message);
             ret = 1;
         }
+        destroy_parser_defs();
         if(selector != NULL) {
             selector_destroy(selector);
         }

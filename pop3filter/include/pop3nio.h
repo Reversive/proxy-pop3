@@ -28,4 +28,6 @@ void pop3_passive_accept(struct selector_key *key);
 
 void init_parser_defs();
 
+void destroy_parser_defs();
+
 #endif //POP3FILTER_POP3NIO_H
