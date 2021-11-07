@@ -13,8 +13,6 @@ command_node dequeue(command_queue queue) {
     queue->size--;
     if (queue->size == 0)
         queue->last = NULL;
-
-    fprintf(stderr, "Dequeuing, new len is %d", queue->size);
     return aux;
 }
 
@@ -28,7 +26,6 @@ void enqueue(command_queue queue, command_node node) {
         queue->last = node;
     }
     queue->size++;
-    fprintf(stderr, "Enqueuing, new len is %d", queue->size);
 }
 
 bool is_empty(command_queue queue) {
