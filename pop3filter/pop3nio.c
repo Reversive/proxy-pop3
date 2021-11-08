@@ -650,7 +650,7 @@ static int request_read(struct selector_key* key) {
 
         if (pop3_ptr->current_command == -1) {
             for (int command = 0; command < COMMANDS; command++) {
-                if (pop3_ptr->client.request.parser_states[command]) {
+                if (pop3_ptr->client.request.parser_states[command]) { //COMANDO\r\n
                     const struct parser_event* curr_command_state = parser_feed(pop3_ptr->parsers[command], ptr[i]);
                     
                     if(curr_command_state->type == STRING_CMP_EQ) {
@@ -666,7 +666,7 @@ static int request_read(struct selector_key* key) {
         }
     }
 
-    pop3_ptr->unmatched_len = read_chars - last_command_end;
+    pop3_ptr->unmatched_len += read_chars - last_command_end;
     
     buffer_write_adv(&pop3_ptr->client_to_origin, read_chars);
 
