@@ -2,6 +2,7 @@
 
 proxy_configuration_ptr proxy_config;
 static bool done = false;
+int server = -1;
 
 
 static void sigterm_handler(const int signal) {
@@ -37,7 +38,7 @@ int main(int argc, char *argv[]) {
 
     init_parser_defs();
 
-	int server = -1;
+//	int server = -1;
 	for (struct addrinfo* addr = server_address; addr != NULL && server == -1; addr = addr->ai_next) {
 		errno = 0;
 		server = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);

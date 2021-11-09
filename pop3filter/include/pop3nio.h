@@ -22,6 +22,7 @@
 #include "../utils/include/parser_utils.h"
 #include "../utils/include/queue.h"
 
+#define MAX_CONNECTIONS 250
 #define N(x) (sizeof(x)/sizeof((x)[0]))
 
 void pop3_passive_accept(struct selector_key *key);
@@ -29,5 +30,7 @@ void pop3_passive_accept(struct selector_key *key);
 void init_parser_defs();
 
 void destroy_parser_defs();
+
+extern int server;
 
 #endif //POP3FILTER_POP3NIO_H

@@ -46,6 +46,8 @@ static const unsigned   max_pool = 50;
 static unsigned         pool_size = 0;
 static struct           pop3* pool = NULL;
 
+size_t current_connections = 0;
+
 enum pop3_state {
     /*
      * Solves origin name server
@@ -614,12 +616,26 @@ static int request_read(struct selector_key* key) {
     
     ssize_t read_chars = recv(pop3_ptr->client_fd, ptr, max_size, 0);
 
-    if (read_chars <= 0) {
+    if (read_chars < 0) {
         pop3_ptr->error_message.message = "Error reading from client";
         if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
         return FAILURE_WITH_MESSAGE;
+    } else if (read_chars == 0) {
+        current_connections--;
+        if(current_connections == MAX_CONNECTIONS - 1) {
+            if (selector_set_interest(key->s, server, OP_READ) != SELECTOR_SUCCESS) {
+                fprintf(stderr, "FATAL: Unable to resuscribe to passive socket\r\n");//TODO ver que hacer
+                exit(1);
+            }
+        }
+
+        if (selector_unregister_fd(key->s, pop3_ptr->client_fd) != SELECTOR_SUCCESS ||
+            selector_unregister_fd(key->s, pop3_ptr->origin_fd) != SELECTOR_SUCCESS)
+            return FAILURE;
+        
+        return DONE;
     }
 
     int last_command_end = 0;
@@ -785,7 +801,6 @@ static int response_write(struct selector_key* key) {
     }
 
     fprintf(stderr, "escribi %ld bytes\n", sent_bytes);
-
 
     buffer_read_adv(&pop3_ptr->origin_to_client, sent_bytes);
     if (buffer_can_read(&pop3_ptr->origin_to_client))
@@ -1054,6 +1069,9 @@ void pop3_passive_accept(struct selector_key* key) {
         goto fail;
     }
 
+    if(current_connections == MAX_CONNECTIONS && selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+        goto fail;
+        
     return;
 
 fail:
@@ -1178,3 +1196,6 @@ void pop3_pool_destroy(void) {
         free(s);
     }
 }
+
+
+ 
