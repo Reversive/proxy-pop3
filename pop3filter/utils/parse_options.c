@@ -42,6 +42,7 @@ proxy_configuration_ptr init_proxy_config() {
     proxy_config->pop3_listen_port          = 1110;
     proxy_config->admin_listen_port         = 9090;
     proxy_config->origin_server_port        = 110;
+    proxy_config->pop3_filter_command       = NULL;
     return proxy_config;
 }
 proxy_configuration_ptr parse_options(int argc, char *argv[]) {
