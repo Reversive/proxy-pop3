@@ -216,6 +216,7 @@ struct transform_st {
     int     write_fd;
     int     read_fd;
     bool    started_reading;
+    bool    started_writing;
 };
 
 struct pop3 {
@@ -877,6 +878,8 @@ static int transform_init(struct selector_key* key) {
     pop3_ptr->orig.transform.write_fd = in[W];
     pop3_ptr->orig.transform.read_fd = out[R];
     pop3_ptr->orig.transform.started_reading = false;
+    pop3_ptr->orig.transform.started_writing = false;
+
     const pid_t cmdpid = fork();
 
     if (cmdpid == -1) {
@@ -938,46 +941,50 @@ static int transform_init(struct selector_key* key) {
 static int transform_write(struct selector_key * key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     size_t max_size;
-    uint8_t * ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
+    uint8_t * ptr;
+
+    if (!pop3_ptr->orig.transform.started_writing) {
+        size_t first_line_end = 0;
+        ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
+        if (max_size <= 0) {
+            return FAILURE;
+        }
+        struct parser * end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
+
+        fprintf(stderr, "Voy a escribir %ld bytes al slave\n", max_size);
+
+        // TODO : transform a no pop3
+        for (size_t i = 0; i < max_size; i++) {
+            const struct parser_event* state = parser_feed(end_of_line_parser, ptr[i]);
+            if(state->type == STRING_CMP_EQ) {
+                first_line_end = i + 1;
+                break;
+            } else if(state->type == STRING_CMP_NEQ) {
+                parser_reset(end_of_line_parser);
+            }
+        }
+
+        buffer_read_adv(&pop3_ptr->origin_to_client, first_line_end - 1);//TODO va el -1?
+        pop3_ptr->orig.transform.started_writing = true;
+    }
+
+    ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
     if (max_size <= 0) {
         return FAILURE;
     }
 
-    struct parser * end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
-    size_t first_line_end = 0;
-
-    fprintf(stderr, "Voy a escribir %ld bytes al slave\n", max_size);
-
-    // TODO : transform a no pop3
-    for (size_t i = 0; i < max_size; i++) {
-        const struct parser_event* state = parser_feed(end_of_line_parser, ptr[i]);
-        if(state->type == STRING_CMP_EQ) {
-            first_line_end = i + 1;
-            break;
-        } else if(state->type == STRING_CMP_NEQ) {
-            parser_reset(end_of_line_parser);
-        }
-    }
-
-    ssize_t bytes_sent;
-    size_t total_sent = first_line_end;
-
-    fprintf(stderr, "el ok termina a los %ld bytes\n", first_line_end);
-
-    while (total_sent < max_size) { //TODO creo que aca se puede bloquear
-        bytes_sent = write(pop3_ptr->orig.transform.write_fd, ptr + total_sent, max_size + 1 - total_sent);
-        if (bytes_sent < 0)
-            return FAILURE;
-
-        total_sent += (size_t) bytes_sent;
-    }
-
-    close(pop3_ptr->orig.transform.write_fd);
-    buffer_read_adv(&pop3_ptr->origin_to_client, max_size);
-
-    if (selector_unregister_fd(key->s, pop3_ptr->orig.transform.write_fd) != SELECTOR_SUCCESS || 
-        selector_set_interest(key->s, pop3_ptr->orig.transform.read_fd, OP_READ) != SELECTOR_SUCCESS)
+    ssize_t bytes_sent = write(pop3_ptr->orig.transform.write_fd, ptr, max_size);
+    if (bytes_sent < 0)
         return FAILURE;
+   
+    buffer_read_adv(&pop3_ptr->origin_to_client, bytes_sent);
+    if(!buffer_can_read(&pop3_ptr->origin_to_client)){
+        close(pop3_ptr->orig.transform.write_fd);
+
+        if (selector_unregister_fd(key->s, pop3_ptr->orig.transform.write_fd) != SELECTOR_SUCCESS || 
+            selector_set_interest(key->s, pop3_ptr->orig.transform.read_fd, OP_READ) != SELECTOR_SUCCESS)
+            return FAILURE;
+    }
 
     return TRANSFORM;
 }
