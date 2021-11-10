@@ -45,6 +45,7 @@ proxy_configuration_ptr init_proxy_config() {
     proxy_config->pop3_filter_command       = NULL;
     return proxy_config;
 }
+
 proxy_configuration_ptr parse_options(int argc, char *argv[]) {
     proxy_configuration_ptr proxy_config = init_proxy_config();
     int option;

@@ -393,6 +393,7 @@ void send_error(int fd, const char* error) {
 }
 
 static int connect_to_origin_by_ip(struct selector_key *key, int family, void *sock_addr, socklen_t sock_addr_size ) {
+    fprintf(stderr, "Me toy conectando por ip\n");
     struct pop3* pop3_ptr = ATTACHMENT(key);
     int sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
     if (sock >= 0) {
@@ -405,6 +406,8 @@ static int connect_to_origin_by_ip(struct selector_key *key, int family, void *s
             if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_register(key->s, sock, &pop3_handler, OP_WRITE, key->data) != SELECTOR_SUCCESS) {
                 goto ip_connect_fail;
             }
+
+            fprintf(stderr, "Conexion en progreso, yendo a CONNECT\n");
             return CONNECT;
         } else if(ret == 0) {
             pop3_ptr->origin_fd = sock;
@@ -438,6 +441,7 @@ static int resolve_origin(struct selector_key* key) {
         struct sockaddr_in servaddr;
         servaddr.sin_family = AF_INET;
         servaddr.sin_port = htons(proxy_config->origin_server_port);
+        inet_pton(AF_INET, proxy_config->origin_server_address, &(servaddr.sin_addr));
         return connect_to_origin_by_ip(key, AF_INET, (void*)&servaddr, sizeof(servaddr));
     } else if (is_ipv6(proxy_config->origin_server_address)) {
         struct sockaddr_in6 servaddr;
@@ -446,6 +450,7 @@ static int resolve_origin(struct selector_key* key) {
         inet_pton(AF_INET6, proxy_config->origin_server_address, &(servaddr.sin6_addr));
         return connect_to_origin_by_ip(key, AF_INET6, (void*)&servaddr, sizeof(servaddr));
     }
+
     memcpy(k, key, sizeof(*k));
     if (pthread_create(&tid, 0, blocking_resolve_origin, k) == -1) {
         return FAILURE;
@@ -501,7 +506,7 @@ static int done_resolving_origin(struct selector_key* key) {
 
 static int connection(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
-    int error;
+    int error = 0;
     socklen_t len = sizeof(error);
     if (getsockopt(key->fd, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
         selector_set_interest_key(key, OP_NOOP);
@@ -874,7 +879,6 @@ static int transform_init(struct selector_key* key) {
         return FAILURE;
     }
 
-    fprintf(stderr, "%d-%d\n", out[R], in[W]);
     pop3_ptr->orig.transform.write_fd = in[W];
     pop3_ptr->orig.transform.read_fd = out[R];
     pop3_ptr->orig.transform.started_reading = false;
@@ -1023,19 +1027,6 @@ static int transform_read(struct selector_key * key) {
         return FAILURE;
 
     return RESPONSE;
-    // fprintf(stderr, "\nSe leyo %d\n", ptr[0]);
-
-    // buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
-    // //}
-
-    // fprintf(stderr, "lei %ld bytes del slave\n", read_chars);
-
-
-    // if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || 
-    //     selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
-    //     return FAILURE;
-
-    // return RESPONSE;
 }
 
 
