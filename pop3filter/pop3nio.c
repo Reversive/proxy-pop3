@@ -699,7 +699,6 @@ static int request_write(struct selector_key* key){
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->client_to_origin, &max_size);
 
     command_node node = peek(pop3_ptr->commands_left);
-    
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, node->command_len, 0)) == -1) {
         pop3_ptr->error_message.message = "Error writing to origin";
@@ -717,7 +716,7 @@ static int request_write(struct selector_key* key){
         pop3_ptr->orig.response.has_args = node->has_args;
         pop3_ptr->orig.response.current_command = node->command;
         free(node);
-        return command_list[pop3_ptr->orig.response.current_command].response_state;
+        return (pop3_ptr->orig.response.current_command == -1) ? RESPONSE : command_list[pop3_ptr->orig.response.current_command].response_state;
     }
 
     node->command_len -= sent_bytes;
