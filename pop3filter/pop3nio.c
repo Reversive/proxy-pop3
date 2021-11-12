@@ -221,6 +221,7 @@ struct transform_st {
     size_t  write_size;
     size_t  curr_size;
     uint8_t * write_ptr;
+    ptr_parser  dot_parser;
 };
 
 struct pop3 {
@@ -982,16 +983,14 @@ static int transform_write(struct selector_key * key) {
             } else {
                 const struct parser_event* state = parser_feed(dot_parser, ptr[i]);// \r\n.
                 if(state->type == STRING_CMP_EQ) {
-                    parser_reset(end_of_line_parser);
+                    parser_reset(dot_parser);
                 } else {
                     if(state->type == STRING_CMP_NEQ)
-                        parser_reset(end_of_line_parser);
+                        parser_reset(dot_parser);
                     
                     write_ptr[write_index++] = ptr[i];
                 }
-            
             }
-
         }
         pop3_ptr->orig.transform.write_size = write_index;
         pop3_ptr->orig.transform.curr_size = write_index;
@@ -1005,7 +1004,7 @@ static int transform_write(struct selector_key * key) {
         return FAILURE;
     }
 
-    ssize_t bytes_sent = write(pop3_ptr->orig.transform.write_fd, ptr, pop3_ptr->orig.transform.curr_size); //escribimos el j en realidad
+    ssize_t bytes_sent = write(pop3_ptr->orig.transform.write_fd, ptr, pop3_ptr->orig.transform.curr_size);
     if (bytes_sent < 0)
         return FAILURE;
 
@@ -1034,23 +1033,43 @@ static int transform_read(struct selector_key * key) {
         memcpy(ptr, response, strlen(response));
         buffer_write_adv(&pop3_ptr->origin_to_client, strlen(response));
         pop3_ptr->orig.transform.started_reading = true;
+        pop3_ptr->orig.transform.dot_parser = parser_init(parser_no_classes(), dot_parser_def);
     }
 
     fprintf(stderr, "Por leer del slave fd : %d\n", pop3_ptr->orig.transform.read_fd);
 
     ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
-    ssize_t read_chars = read(pop3_ptr->orig.transform.read_fd, ptr, max_size);
+    uint8_t * read_ptr = malloc(sizeof(uint8_t) * max_size/2); //TODO revisar size
+    ssize_t read_chars = read(pop3_ptr->orig.transform.read_fd, read_ptr, max_size/2);
     if (read_chars < 0) {
         perror("LEER: ");
         return FAILURE;
     }
 
     if (read_chars > 0) {
-        buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
+        ssize_t write_idx = 0;
+        for (ssize_t i = 0; i < read_chars; i++) {
+            const struct parser_event* state = parser_feed(pop3_ptr->orig.transform.dot_parser, read_ptr[i]);
+            if(state->type == STRING_CMP_EQ) {
+                ptr[write_idx++] = '.';
+                parser_reset(pop3_ptr->orig.transform.dot_parser);
+            } else if(state->type == STRING_CMP_NEQ) {
+                parser_reset(pop3_ptr->orig.transform.dot_parser);
+            }
+            ptr[write_idx++] = read_ptr[i];
+        }
+        free(read_ptr);
+        buffer_write_adv(&pop3_ptr->origin_to_client, write_idx);
         return TRANSFORM;
     }
 
     close(pop3_ptr->orig.transform.read_fd);
+    free(read_ptr);
+
+    ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
+    char *response = ".\r\n"; 
+    memcpy(ptr, response, 3);
+    buffer_write_adv(&pop3_ptr->origin_to_client, 3);
 
     if (selector_unregister_fd(key->s, pop3_ptr->orig.transform.read_fd) != SELECTOR_SUCCESS || 
         selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
