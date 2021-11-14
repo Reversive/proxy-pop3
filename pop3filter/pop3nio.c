@@ -46,7 +46,11 @@ static const unsigned   max_pool = 50;
 static unsigned         pool_size = 0;
 static struct           pop3* pool = NULL;
 
+//Metricas
+size_t historic_connections = 0;
 size_t current_connections = 0;
+size_t transferred_bytes = 0;
+
 
 enum pop3_state {
     /*
@@ -533,9 +537,12 @@ static int connection(struct selector_key* key) {
         freeaddrinfo(pop3_ptr->origin_resolution);
         pop3_ptr->origin_resolution = NULL;
     }
-        
+
+    historic_connections++;
+
     pop3_ptr->origin_fd = key->fd;
-    selector_set_interest_key(key, OP_READ);
+    if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS)
+        return FAILURE;
     return HELLO;
 }
 
@@ -598,6 +605,9 @@ static int hello_write(struct selector_key* key) {
         return FAILURE_WITH_MESSAGE;
     }
     buffer_read_adv(&pop3_ptr->origin_to_client, sent_bytes);
+
+    transferred_bytes += sent_bytes;
+
     if(buffer_pending_read(&pop3_ptr->origin_to_client) == 0) {
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS){
             return FAILURE;
@@ -709,6 +719,9 @@ static int request_write(struct selector_key* key){
         return FAILURE_WITH_MESSAGE;
     }
     buffer_read_adv(&pop3_ptr->client_to_origin, sent_bytes);
+
+    transferred_bytes += sent_bytes;
+
     if (sent_bytes == node->command_len) {
         dequeue(pop3_ptr->commands_left);
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->client_fd, OP_NOOP) != SELECTOR_SUCCESS){
@@ -759,7 +772,7 @@ static int response_read(struct selector_key* key) {
     for(int i = 0; i < read_chars; i++) {
         const struct parser_event* end_state = parser_feed(pop3_ptr->orig.response.end_of_line_parser, ptr[i]);
         if(end_state->type == STRING_CMP_EQ) {
-            fprintf(stderr, "%d - %d\n", pop3_ptr->orig.response.is_positive_response , pop3_ptr->orig.response.current_command);
+            //fprintf(stderr, "%d - %d\n", pop3_ptr->orig.response.is_positive_response , pop3_ptr->orig.response.current_command);
             if(pop3_ptr->orig.response.is_positive_response && pop3_ptr->orig.response.current_command == CMD_RETR && proxy_config->pop3_filter_command != NULL) {
                 buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);  
                 return transform_init(key);
@@ -782,13 +795,11 @@ static int response_read(struct selector_key* key) {
 }
 
 static int response_write(struct selector_key* key) {
-    fprintf(stderr, "Entre al response write\n");
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     size_t max_size;
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
 
     ssize_t sent_bytes;
-    fprintf(stderr, "Intentando escribir %ld bytes\n", max_size);
     if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
         pop3_ptr->error_message.message = "Error writing to client";
 
@@ -798,21 +809,19 @@ static int response_write(struct selector_key* key) {
         return FAILURE_WITH_MESSAGE;
     }
 
-    fprintf(stderr, "escribi %ld bytes\n", sent_bytes);
+    transferred_bytes += sent_bytes;
 
     buffer_read_adv(&pop3_ptr->origin_to_client, sent_bytes);
     if (buffer_can_read(&pop3_ptr->origin_to_client))
         return RESPONSE;
 
     if(is_empty(pop3_ptr->commands_left)) {
-
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS 
             || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS)
             return FAILURE;
         
         return REQUEST;
     }
-
 
     if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS 
             || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
@@ -898,8 +907,6 @@ static int transform_init(struct selector_key* key) {
         perror("creating process for user command");
         return FAILURE;
     } else if (cmdpid == 0) {
-        // en el hijo debemos reemplazar stdin y stdout por los pipes antes
-        // de ejecutar el comando.
         int ret = 0;
         close(in[W]);
         close(out[R]);
@@ -955,8 +962,6 @@ static int transform_write(struct selector_key * key) {
     size_t max_size;
     uint8_t * ptr;
 
-    
-
     if (!pop3_ptr->orig.transform.started_writing) {
         size_t first_line_end = 0;
         ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
@@ -1000,9 +1005,6 @@ static int transform_write(struct selector_key * key) {
 
     
     ptr = pop3_ptr->orig.transform.write_ptr; //TODO ver de hacer un mejor manejo de estructuras
-    if (max_size <= 0) {
-        return FAILURE;
-    }
 
     ssize_t bytes_sent = write(pop3_ptr->orig.transform.write_fd, ptr, pop3_ptr->orig.transform.curr_size);
     if (bytes_sent < 0)
@@ -1243,6 +1245,3 @@ void pop3_pool_destroy(void) {
         free(s);
     }
 }
-
-
- 
