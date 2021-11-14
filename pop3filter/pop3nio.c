@@ -198,6 +198,8 @@ struct response_st {
     ptr_parser end_of_line_parser;
     bool is_positive_response;
     bool has_args;
+    bool is_done;
+    int write_fd;
     int current_command;
 };
 
@@ -221,11 +223,14 @@ struct transform_st {
     int     write_fd;
     int     read_fd;
     bool    started_reading;
-    bool    started_writing;
-    size_t  write_size;
-    size_t  curr_size;
-    uint8_t * write_ptr;
+    bool    skipped_line;
+    // size_t  write_size;
+    // size_t  curr_size;
+    // uint8_t * write_ptr;
+    t_buffer write_buff;
     ptr_parser  dot_parser;
+    ptr_parser  end_parser;
+    bool    found_end;
 };
 
 struct pop3 {
@@ -257,9 +262,14 @@ struct pop3 {
     union {
         struct capa_st      capa;
         struct response_st  response;
-        struct transform_st transform;
+        //struct transform_st transform;
         struct hello_st     hello_state;
     } orig;
+
+    struct transform_st transform;
+
+    enum pop3_state current_return;
+
 
     uint8_t                 read_buffer[BUFFER_SIZE];
     uint8_t                 write_buffer[BUFFER_SIZE];
@@ -548,17 +558,15 @@ static int connection(struct selector_key* key) {
 
 static void hello_departure(struct selector_key *key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
-    //parser_destroy(pop3_ptr->orig.hello_state.hello_parser);
     pop3_ptr->commands_left = new_command_queue();
-
-    
-    // pop3_ptr->orig.capa.end_of_multiline_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
-    // pop3_ptr->client.request.end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
     pop3_ptr->current_command = -1;
     for (int i = 0; i < COMMANDS; i++)
          pop3_ptr->client.request.parser_states[i] = 1;
     
     pop3_ptr->may_multi = true;
+    pop3_ptr->orig.response.end_of_line_parser = NULL;
+    pop3_ptr->orig.response.is_done = false;
+
 }
 
 static int hello_read(struct selector_key* key) {
@@ -730,6 +738,7 @@ static int request_write(struct selector_key* key){
         pop3_ptr->orig.response.has_args = node->has_args;
         pop3_ptr->orig.response.current_command = node->command;
         free(node);
+
         return (pop3_ptr->orig.response.current_command == -1) ? RESPONSE : command_list[pop3_ptr->orig.response.current_command].response_state;
     }
 
@@ -738,8 +747,7 @@ static int request_write(struct selector_key* key){
 }
 
 static void response_arrival(struct selector_key* key) {
-    struct pop3 *pop3_ptr = ATTACHMENT(key);
-    pop3_ptr->orig.response.end_of_line_parser = NULL;
+    //struct pop3 *pop3_ptr = ATTACHMENT(key);
 }
 
 static int response_read(struct selector_key* key) {
@@ -747,6 +755,8 @@ static int response_read(struct selector_key* key) {
     
     size_t max_size;
     uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
+
+    
     ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
     if (read_chars <= 0) {
         pop3_ptr->error_message.message = "Error reading from origin";
@@ -757,9 +767,22 @@ static int response_read(struct selector_key* key) {
     }
     
     if (pop3_ptr->orig.response.end_of_line_parser == NULL) {
-        fprintf(stderr, "estoy entrando comando %d \n", pop3_ptr->orig.response.current_command);
+
+        pop3_ptr->current_return = RESPONSE;
+        pop3_ptr->orig.response.write_fd = pop3_ptr->client_fd;
+
         if(pop3_ptr->orig.response.current_command != -1 && 
             command_list[pop3_ptr->orig.response.current_command].is_multi(pop3_ptr) && ptr[0] == '+') {
+            
+            pop3_ptr->current_return = command_list[pop3_ptr->orig.response.current_command].response_state;
+
+            if(pop3_ptr->orig.response.current_command == CMD_RETR && proxy_config->pop3_filter_command != NULL) {
+                //buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);  
+                pop3_ptr->current_return =  transform_init(key);
+                pop3_ptr->orig.response.write_fd = pop3_ptr->transform.write_fd;
+                if (pop3_ptr->current_return == FAILURE) 
+                    return FAILURE;
+            }
                 
             pop3_ptr->orig.response.is_positive_response = true;    
             pop3_ptr->orig.response.end_of_line_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
@@ -772,16 +795,11 @@ static int response_read(struct selector_key* key) {
     for(int i = 0; i < read_chars; i++) {
         const struct parser_event* end_state = parser_feed(pop3_ptr->orig.response.end_of_line_parser, ptr[i]);
         if(end_state->type == STRING_CMP_EQ) {
-            //fprintf(stderr, "%d - %d\n", pop3_ptr->orig.response.is_positive_response , pop3_ptr->orig.response.current_command);
-            if(pop3_ptr->orig.response.is_positive_response && pop3_ptr->orig.response.current_command == CMD_RETR && proxy_config->pop3_filter_command != NULL) {
-                buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);  
-                return transform_init(key);
-            }
-            
-            if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS
-                || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
-                return FAILURE;
+            // if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS
+            //     || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+            //     return FAILURE;
 
+            pop3_ptr->orig.response.is_done = true;
             parser_reset(pop3_ptr->orig.response.end_of_line_parser);
             pop3_ptr->orig.response.end_of_line_parser = NULL;
             break;
@@ -790,8 +808,17 @@ static int response_read(struct selector_key* key) {
         }
     }
 
-    buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);    
-    return RESPONSE;
+    buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
+
+    if(selector_set_interest(key->s, pop3_ptr->orig.response.write_fd, OP_WRITE) != SELECTOR_SUCCESS)
+        return FAILURE;
+        
+    if(pop3_ptr->orig.response.is_done || !buffer_can_write(&pop3_ptr->origin_to_client)) {
+        if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+            return FAILURE;
+    }    
+    
+    return pop3_ptr->current_return;
 }
 
 static int response_write(struct selector_key* key) {
@@ -815,17 +842,28 @@ static int response_write(struct selector_key* key) {
     if (buffer_can_read(&pop3_ptr->origin_to_client))
         return RESPONSE;
 
+    if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+        return FAILURE;
+
+    if(!pop3_ptr->orig.response.is_done){
+        if(selector_set_interest(key->s, pop3_ptr->origin_fd, OP_READ) != SELECTOR_SUCCESS)
+            return FAILURE;
+
+        return RESPONSE;
+    }
+
+    pop3_ptr->orig.response.is_done = false;
+
     if(is_empty(pop3_ptr->commands_left)) {
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS 
             || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS)
             return FAILURE;
-        
+        //TODO buffer_compact
         return REQUEST;
     }
 
-    if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS 
-            || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
-            return FAILURE;
+    if(selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
+        return FAILURE;
 
     return REQUEST;
 }
@@ -896,10 +934,10 @@ static int transform_init(struct selector_key* key) {
         return FAILURE;
     }
 
-    pop3_ptr->orig.transform.write_fd = in[W];
-    pop3_ptr->orig.transform.read_fd = out[R];
-    pop3_ptr->orig.transform.started_reading = false;
-    pop3_ptr->orig.transform.started_writing = false;
+    pop3_ptr->transform.write_fd = in[W];
+    pop3_ptr->transform.read_fd = out[R];
+    pop3_ptr->transform.started_reading = false;
+    pop3_ptr->transform.skipped_line = false;
 
     const pid_t cmdpid = fork();
 
@@ -938,9 +976,7 @@ static int transform_init(struct selector_key* key) {
     close(out[W]);
 
     if (selector_fd_set_nio(in[W]) == -1 || selector_fd_set_nio(out[R]) == -1 || 
-        selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS ||
-        selector_set_interest(key->s, pop3_ptr->client_fd, OP_NOOP) != SELECTOR_SUCCESS ||
-        selector_register(key->s, in[W], &pop3_handler, OP_WRITE, key->data) != SELECTOR_SUCCESS) {
+        selector_register(key->s, in[W], &pop3_handler, OP_NOOP, key->data) != SELECTOR_SUCCESS) {
 
         close(in[W]);
         close(out[R]);
@@ -962,66 +998,142 @@ static int transform_write(struct selector_key * key) {
     size_t max_size;
     uint8_t * ptr;
 
-    if (!pop3_ptr->orig.transform.started_writing) {
-        size_t first_line_end = 0;
+    if (!pop3_ptr->transform.skipped_line) { // skipped first line
         ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
-        if (max_size <= 0) {
-            return FAILURE;
-        }
-        uint8_t * write_ptr = malloc(sizeof(uint8_t) * max_size);
-        pop3_ptr->orig.transform.write_ptr = write_ptr;
-
         struct parser * end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
-        struct parser * dot_parser = parser_init(parser_no_classes(), dot_parser_def);
-
-        fprintf(stderr, "Voy a escribir %ld bytes al slave\n", max_size);
-
-        size_t write_index = 0;
-        for (size_t i = 0; i < max_size - 3; i++) {
-            if (first_line_end == 0) {
-                const struct parser_event* state = parser_feed(end_of_line_parser, ptr[i]);
-                if(state->type == STRING_CMP_EQ) {
-                    first_line_end = i + 1;
-                } else if(state->type == STRING_CMP_NEQ) {
-                    parser_reset(end_of_line_parser);
-                }
-            } else {
-                const struct parser_event* state = parser_feed(dot_parser, ptr[i]);// \r\n.
-                if(state->type == STRING_CMP_EQ) {
-                    parser_reset(dot_parser);
-                } else {
-                    if(state->type == STRING_CMP_NEQ)
-                        parser_reset(dot_parser);
-                    
-                    write_ptr[write_index++] = ptr[i];
-                }
+        size_t i;
+        for (i = 0; i < max_size; i++) {
+            const struct parser_event* state = parser_feed(end_of_line_parser, ptr[i]);
+            if(state->type == STRING_CMP_EQ) {
+                pop3_ptr->transform.skipped_line = true;
+                uint8_t * buff_ptr = malloc(sizeof(uint8_t) * BUFFER_SIZE);
+                buffer_init(&pop3_ptr->transform.write_buff, BUFFER_SIZE, buff_ptr); //TODO ver que sea uno ya guardado
+                pop3_ptr->transform.dot_parser = parser_init(parser_no_classes(), dot_parser_def);
+                pop3_ptr->transform.end_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
+                break;
+            } else if(state->type == STRING_CMP_NEQ) {
+                parser_reset(end_of_line_parser);
             }
         }
-        pop3_ptr->orig.transform.write_size = write_index;
-        pop3_ptr->orig.transform.curr_size = write_index;
-        buffer_read_adv(&pop3_ptr->origin_to_client, max_size);
-        pop3_ptr->orig.transform.started_writing = true;
+
+        buffer_read_adv(&pop3_ptr->origin_to_client, i);
+        if (!pop3_ptr->transform.skipped_line || !buffer_can_read(&pop3_ptr->origin_to_client)) {
+            if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS 
+                || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_READ) != SELECTOR_SUCCESS)
+                return FAILURE;
+
+            return RESPONSE;
+        }
     }
 
-    
-    ptr = pop3_ptr->orig.transform.write_ptr; //TODO ver de hacer un mejor manejo de estructuras
+    // struct parser * dot_parser = parser_init(parser_no_classes(), dot_parser_def);
+    // struct parser * end_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
 
-    ssize_t bytes_sent = write(pop3_ptr->orig.transform.write_fd, ptr, pop3_ptr->orig.transform.curr_size);
+    if (!pop3_ptr->transform.found_end) {
+        ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
+        size_t write_max_size;
+        uint8_t * write_ptr = buffer_write_ptr(&pop3_ptr->transform.write_buff, &write_max_size);//malloc(sizeof(uint8_t) * max_size);
+        if (write_max_size < max_size)
+            max_size = write_max_size;
+
+        size_t write_index = 0;
+        for (size_t i = 0; i < max_size; i++) {
+            const struct parser_event* end_state = parser_feed(pop3_ptr->transform.end_parser, ptr[i]);// \r\n.\r\n
+            if(end_state->type == STRING_CMP_EQ) {
+                parser_reset(pop3_ptr->transform.end_parser);
+                pop3_ptr->transform.found_end = true;
+                break;
+            } else if(end_state->type == STRING_CMP_NEQ) {
+                parser_reset(pop3_ptr->transform.end_parser);
+            }
+
+            const struct parser_event* state = parser_feed(pop3_ptr->transform.dot_parser, ptr[i]);// \r\n.
+            if(state->type == STRING_CMP_EQ) {
+                parser_reset(pop3_ptr->transform.dot_parser);
+            } else {
+                if(state->type == STRING_CMP_NEQ)
+                    parser_reset(pop3_ptr->transform.dot_parser);
+                
+                write_ptr[write_index++] = ptr[i];
+            }
+        }
+
+        buffer_write_adv(&pop3_ptr->transform.write_buff, write_index);
+    }
+
+
+    // if (!pop3_ptr->transform.skipped_line) {
+    //     size_t first_line_end = 0;
+    //     ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
+    //     if (max_size <= 0) {
+    //         return FAILURE;
+    //     }
+    //     uint8_t * write_ptr = malloc(sizeof(uint8_t) * max_size);
+    //     pop3_ptr->transform.write_ptr = write_ptr;
+
+    //     struct parser * end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
+    //     struct parser * dot_parser = parser_init(parser_no_classes(), dot_parser_def);
+
+    //     fprintf(stderr, "Voy a escribir %ld bytes al slave\n", max_size);
+
+    //     size_t write_index = 0;
+    //     for (size_t i = 0; i < max_size - 3; i++) {
+    //         if (first_line_end == 0) {
+    //             const struct parser_event* state = parser_feed(end_of_line_parser, ptr[i]);
+    //             if(state->type == STRING_CMP_EQ) {
+    //                 first_line_end = i + 1;
+    //             } else if(state->type == STRING_CMP_NEQ) {
+    //                 parser_reset(end_of_line_parser);
+    //             }
+    //         } else {
+    //             const struct parser_event* state = parser_feed(dot_parser, ptr[i]);// \r\n.
+    //             if(state->type == STRING_CMP_EQ) {
+    //                 parser_reset(dot_parser);
+    //             } else {
+    //                 if(state->type == STRING_CMP_NEQ)
+    //                     parser_reset(dot_parser);
+                    
+    //                 write_ptr[write_index++] = ptr[i];
+    //             }
+    //         }
+    //     }
+    //     pop3_ptr->transform.write_size = write_index;
+    //     pop3_ptr->transform.curr_size = write_index;
+    //     buffer_read_adv(&pop3_ptr->origin_to_client, max_size);
+    //     pop3_ptr->transform.skipped_line = true;
+    // }
+
+    
+    ptr = buffer_read_ptr(&pop3_ptr->transform.write_buff, &max_size);//pop3_ptr->transform.write_ptr; //TODO ver de hacer un mejor manejo de estructuras
+
+    ssize_t bytes_sent = write(pop3_ptr->transform.write_fd, ptr, max_size);
     if (bytes_sent < 0)
         return FAILURE;
 
-    pop3_ptr->orig.transform.curr_size -= bytes_sent;
-    pop3_ptr->orig.transform.write_ptr += bytes_sent;
-    if(pop3_ptr->orig.transform.curr_size == 0) { 
-        free(pop3_ptr->orig.transform.write_ptr - pop3_ptr->orig.transform.write_size);
-        close(pop3_ptr->orig.transform.write_fd);
+    buffer_read_adv(&pop3_ptr->transform.write_buff, bytes_sent);
 
-        if (selector_unregister_fd(key->s, pop3_ptr->orig.transform.write_fd) != SELECTOR_SUCCESS || 
-            selector_set_interest(key->s, pop3_ptr->orig.transform.read_fd, OP_READ) != SELECTOR_SUCCESS)
+    if (buffer_can_read(&pop3_ptr->transform.write_buff))
+        return TRANSFORM;
+
+    // pop3_ptr->transform.curr_size -= bytes_sent;
+    // pop3_ptr->transform.write_ptr += bytes_sent;
+    if(pop3_ptr->transform.found_end) { 
+        //free(pop3_ptr->transform.write_ptr - pop3_ptr->transform.write_size);
+        close(pop3_ptr->transform.write_fd);
+        // TODO destroy buffer
+
+        if (selector_unregister_fd(key->s, pop3_ptr->transform.write_fd) != SELECTOR_SUCCESS || 
+            selector_set_interest(key->s, pop3_ptr->transform.read_fd, OP_READ) != SELECTOR_SUCCESS)
             return FAILURE;
+
+        return TRANSFORM;
     }
 
-    return TRANSFORM;
+    if (selector_set_interest(key->s, pop3_ptr->origin_fd, OP_READ) != SELECTOR_SUCCESS ||
+        selector_set_interest_key(key, OP_NOOP))
+        return FAILURE;
+
+    return RESPONSE;
 }
 
 static int transform_read(struct selector_key * key) {
@@ -1029,20 +1141,20 @@ static int transform_read(struct selector_key * key) {
 
     size_t max_size;
     uint8_t * ptr;
-    if (!pop3_ptr->orig.transform.started_reading) {
+    if (!pop3_ptr->transform.started_reading) {
         ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
         char *response = "+OK todo biento\r\n"; // TODO mandar rta real
         memcpy(ptr, response, strlen(response));
         buffer_write_adv(&pop3_ptr->origin_to_client, strlen(response));
-        pop3_ptr->orig.transform.started_reading = true;
-        pop3_ptr->orig.transform.dot_parser = parser_init(parser_no_classes(), dot_parser_def);
+        pop3_ptr->transform.started_reading = true;
+        pop3_ptr->transform.dot_parser = parser_init(parser_no_classes(), dot_parser_def);
     }
 
-    fprintf(stderr, "Por leer del slave fd : %d\n", pop3_ptr->orig.transform.read_fd);
+    fprintf(stderr, "Por leer del slave fd : %d\n", pop3_ptr->transform.read_fd);
 
     ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
     uint8_t * read_ptr = malloc(sizeof(uint8_t) * max_size/2); //TODO revisar size
-    ssize_t read_chars = read(pop3_ptr->orig.transform.read_fd, read_ptr, max_size/2);
+    ssize_t read_chars = read(pop3_ptr->transform.read_fd, read_ptr, max_size/2);
     if (read_chars < 0) {
         perror("LEER: ");
         return FAILURE;
@@ -1051,12 +1163,12 @@ static int transform_read(struct selector_key * key) {
     if (read_chars > 0) {
         ssize_t write_idx = 0;
         for (ssize_t i = 0; i < read_chars; i++) {
-            const struct parser_event* state = parser_feed(pop3_ptr->orig.transform.dot_parser, read_ptr[i]);
+            const struct parser_event* state = parser_feed(pop3_ptr->transform.dot_parser, read_ptr[i]);
             if(state->type == STRING_CMP_EQ) {
                 ptr[write_idx++] = '.';
-                parser_reset(pop3_ptr->orig.transform.dot_parser);
+                parser_reset(pop3_ptr->transform.dot_parser);
             } else if(state->type == STRING_CMP_NEQ) {
-                parser_reset(pop3_ptr->orig.transform.dot_parser);
+                parser_reset(pop3_ptr->transform.dot_parser);
             }
             ptr[write_idx++] = read_ptr[i];
         }
@@ -1065,7 +1177,7 @@ static int transform_read(struct selector_key * key) {
         return TRANSFORM;
     }
 
-    close(pop3_ptr->orig.transform.read_fd);
+    close(pop3_ptr->transform.read_fd);
     free(read_ptr);
 
     ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
@@ -1073,7 +1185,7 @@ static int transform_read(struct selector_key * key) {
     memcpy(ptr, response, 3);
     buffer_write_adv(&pop3_ptr->origin_to_client, 3);
 
-    if (selector_unregister_fd(key->s, pop3_ptr->orig.transform.read_fd) != SELECTOR_SUCCESS || 
+    if (selector_unregister_fd(key->s, pop3_ptr->transform.read_fd) != SELECTOR_SUCCESS || 
         selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
         return FAILURE;
 
