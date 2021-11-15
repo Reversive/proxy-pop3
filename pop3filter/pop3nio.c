@@ -189,18 +189,20 @@ static const struct state_definition handlers[] = {
 };
 
 struct request_st {
-    int parser_states[COMMANDS];
-    ptr_parser end_of_line_parser;
+    int         parser_states[COMMANDS];
+    ptr_parser  end_of_line_parser;
 };
 
 struct response_st {
-    t_buffer* rb, * wb;
-    ptr_parser end_of_line_parser;
-    bool is_positive_response;
-    bool has_args;
-    bool is_done;
-    int write_fd;
-    int current_command;
+    // t_buffer*   rb, * wb;
+    ptr_parser  end_of_line_parser;
+    bool        is_positive_response;
+    bool        has_args;
+    bool        is_done;
+    int         write_fd;
+    int         read_fd;
+    int         current_command;
+    bool        send_multi;
 };
 
 struct message_packet {
@@ -224,6 +226,8 @@ struct transform_st {
     int     read_fd;
     bool    started_reading;
     bool    skipped_line;
+    bool    is_done;
+    bool    was_dot;
     // size_t  write_size;
     // size_t  curr_size;
     // uint8_t * write_ptr;
@@ -756,7 +760,6 @@ static int response_read(struct selector_key* key) {
     size_t max_size;
     uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
 
-    
     ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
     if (read_chars <= 0) {
         pop3_ptr->error_message.message = "Error reading from origin";
@@ -767,19 +770,20 @@ static int response_read(struct selector_key* key) {
     }
     
     if (pop3_ptr->orig.response.end_of_line_parser == NULL) {
-
         pop3_ptr->current_return = RESPONSE;
         pop3_ptr->orig.response.write_fd = pop3_ptr->client_fd;
+        pop3_ptr->orig.response.read_fd = pop3_ptr->origin_fd;
 
-        if(pop3_ptr->orig.response.current_command != -1 && 
+        if (pop3_ptr->orig.response.current_command != -1 && 
             command_list[pop3_ptr->orig.response.current_command].is_multi(pop3_ptr) && ptr[0] == '+') {
             
             pop3_ptr->current_return = command_list[pop3_ptr->orig.response.current_command].response_state;
 
             if(pop3_ptr->orig.response.current_command == CMD_RETR && proxy_config->pop3_filter_command != NULL) {
-                //buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);  
-                pop3_ptr->current_return =  transform_init(key);
+                pop3_ptr->current_return = transform_init(key);
                 pop3_ptr->orig.response.write_fd = pop3_ptr->transform.write_fd;
+                pop3_ptr->orig.response.read_fd = pop3_ptr->transform.read_fd;
+
                 if (pop3_ptr->current_return == FAILURE) 
                     return FAILURE;
             }
@@ -794,37 +798,41 @@ static int response_read(struct selector_key* key) {
 
     for(int i = 0; i < read_chars; i++) {
         const struct parser_event* end_state = parser_feed(pop3_ptr->orig.response.end_of_line_parser, ptr[i]);
+      
         if(end_state->type == STRING_CMP_EQ) {
-            // if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS
-            //     || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
-            //     return FAILURE;
-
             pop3_ptr->orig.response.is_done = true;
+            pop3_ptr->orig.response.send_multi = false;
+
             parser_reset(pop3_ptr->orig.response.end_of_line_parser);
             pop3_ptr->orig.response.end_of_line_parser = NULL;
             break;
         } else if(end_state->type == STRING_CMP_NEQ) {
             parser_reset(pop3_ptr->orig.response.end_of_line_parser);
+            if (ptr[i] == '\r')
+                parser_feed(pop3_ptr->orig.response.end_of_line_parser, '\r');
         }
     }
 
     buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
-
-    if(selector_set_interest(key->s, pop3_ptr->orig.response.write_fd, OP_WRITE) != SELECTOR_SUCCESS)
-        return FAILURE;
         
     if(pop3_ptr->orig.response.is_done || !buffer_can_write(&pop3_ptr->origin_to_client)) {
-        if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+        if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || 
+            selector_set_interest(key->s, pop3_ptr->orig.response.write_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
+    
+        return pop3_ptr->current_return;
     }    
     
-    return pop3_ptr->current_return;
+    return RESPONSE;
 }
 
 static int response_write(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     size_t max_size;
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
+
+
+    fprintf(stderr, "Entre al response write\n");
 
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
@@ -842,27 +850,39 @@ static int response_write(struct selector_key* key) {
     if (buffer_can_read(&pop3_ptr->origin_to_client))
         return RESPONSE;
 
-    if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
-        return FAILURE;
 
-    if(!pop3_ptr->orig.response.is_done){
-        if(selector_set_interest(key->s, pop3_ptr->origin_fd, OP_READ) != SELECTOR_SUCCESS)
+    if(!pop3_ptr->orig.response.is_done){ // TODO aca hay un problema con el transform
+        if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS ||
+            selector_set_interest(key->s, pop3_ptr->orig.response.read_fd, OP_READ) != SELECTOR_SUCCESS)
             return FAILURE;
 
+        return pop3_ptr->current_return;
+    }
+
+    if (pop3_ptr->orig.response.send_multi) {
+        fprintf(stderr, "Appending CRLF.CRLF\n");
+        size_t max_size;
+        uint8_t * ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
+        memcpy(ptr, "\r\n.\r\n", 5);
+        buffer_write_adv(&pop3_ptr->origin_to_client, 5);
+        pop3_ptr->orig.response.send_multi = false;
         return RESPONSE;
     }
 
-    pop3_ptr->orig.response.is_done = false;
 
+
+    pop3_ptr->orig.response.is_done = false;
     if(is_empty(pop3_ptr->commands_left)) {
         if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS 
             || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS)
             return FAILURE;
-        //TODO buffer_compact
+
+        buffer_compact(&pop3_ptr->client_to_origin);
         return REQUEST;
     }
 
-    if(selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
+    if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || 
+        selector_set_interest(key->s, pop3_ptr->origin_fd, OP_WRITE) != SELECTOR_SUCCESS)
         return FAILURE;
 
     return REQUEST;
@@ -938,6 +958,9 @@ static int transform_init(struct selector_key* key) {
     pop3_ptr->transform.read_fd = out[R];
     pop3_ptr->transform.started_reading = false;
     pop3_ptr->transform.skipped_line = false;
+    pop3_ptr->transform.found_end = false;
+    pop3_ptr->transform.is_done = false;
+    pop3_ptr->transform.was_dot = false;
 
     const pid_t cmdpid = fork();
 
@@ -998,7 +1021,15 @@ static int transform_write(struct selector_key * key) {
     size_t max_size;
     uint8_t * ptr;
 
-    if (!pop3_ptr->transform.skipped_line) { // skipped first line
+    fprintf(stderr, "Entre al transform write\n");
+
+
+    if (!pop3_ptr->transform.is_done) {
+        pop3_ptr->transform.is_done = pop3_ptr->orig.response.is_done;
+        pop3_ptr->orig.response.is_done = false;
+    }
+
+    if (!pop3_ptr->transform.skipped_line) {
         ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
         struct parser * end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
         size_t i;
@@ -1017,7 +1048,7 @@ static int transform_write(struct selector_key * key) {
         }
 
         buffer_read_adv(&pop3_ptr->origin_to_client, i);
-        if (!pop3_ptr->transform.skipped_line || !buffer_can_read(&pop3_ptr->origin_to_client)) {
+        if (!pop3_ptr->transform.skipped_line || !buffer_can_read(&pop3_ptr->origin_to_client)) { //TODO verificar que este bien
             if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS 
                 || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_READ) != SELECTOR_SUCCESS)
                 return FAILURE;
@@ -1026,17 +1057,15 @@ static int transform_write(struct selector_key * key) {
         }
     }
 
-    // struct parser * dot_parser = parser_init(parser_no_classes(), dot_parser_def);
-    // struct parser * end_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
-
     if (!pop3_ptr->transform.found_end) {
         ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
         size_t write_max_size;
-        uint8_t * write_ptr = buffer_write_ptr(&pop3_ptr->transform.write_buff, &write_max_size);//malloc(sizeof(uint8_t) * max_size);
+        uint8_t * write_ptr = buffer_write_ptr(&pop3_ptr->transform.write_buff, &write_max_size);
         if (write_max_size < max_size)
             max_size = write_max_size;
 
         size_t write_index = 0;
+
         for (size_t i = 0; i < max_size; i++) {
             const struct parser_event* end_state = parser_feed(pop3_ptr->transform.end_parser, ptr[i]);// \r\n.\r\n
             if(end_state->type == STRING_CMP_EQ) {
@@ -1045,66 +1074,34 @@ static int transform_write(struct selector_key * key) {
                 break;
             } else if(end_state->type == STRING_CMP_NEQ) {
                 parser_reset(pop3_ptr->transform.end_parser);
+                if (ptr[i] == '\r')
+                    parser_feed(pop3_ptr->transform.end_parser, '\r');
             }
 
-            const struct parser_event* state = parser_feed(pop3_ptr->transform.dot_parser, ptr[i]);// \r\n.
-            if(state->type == STRING_CMP_EQ) {
+            const struct parser_event* dot_state = parser_feed(pop3_ptr->transform.dot_parser, ptr[i]);// \r\n.\nasd\r\n \r\n\r\n.
+            if(dot_state->type == STRING_CMP_EQ) {
                 parser_reset(pop3_ptr->transform.dot_parser);
+                pop3_ptr->transform.was_dot = true;
             } else {
-                if(state->type == STRING_CMP_NEQ)
+                if(dot_state->type == STRING_CMP_NEQ) {
                     parser_reset(pop3_ptr->transform.dot_parser);
+                    if (ptr[i] == '\r')
+                        parser_feed(pop3_ptr->transform.dot_parser, '\r');
+                } else if (pop3_ptr->transform.was_dot) {
+                    pop3_ptr->transform.was_dot = false;
+                    continue;
+                }
                 
+                pop3_ptr->transform.was_dot = false;
                 write_ptr[write_index++] = ptr[i];
             }
         }
 
+        buffer_read_adv(&pop3_ptr->origin_to_client, max_size);
         buffer_write_adv(&pop3_ptr->transform.write_buff, write_index);
     }
-
-
-    // if (!pop3_ptr->transform.skipped_line) {
-    //     size_t first_line_end = 0;
-    //     ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
-    //     if (max_size <= 0) {
-    //         return FAILURE;
-    //     }
-    //     uint8_t * write_ptr = malloc(sizeof(uint8_t) * max_size);
-    //     pop3_ptr->transform.write_ptr = write_ptr;
-
-    //     struct parser * end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
-    //     struct parser * dot_parser = parser_init(parser_no_classes(), dot_parser_def);
-
-    //     fprintf(stderr, "Voy a escribir %ld bytes al slave\n", max_size);
-
-    //     size_t write_index = 0;
-    //     for (size_t i = 0; i < max_size - 3; i++) {
-    //         if (first_line_end == 0) {
-    //             const struct parser_event* state = parser_feed(end_of_line_parser, ptr[i]);
-    //             if(state->type == STRING_CMP_EQ) {
-    //                 first_line_end = i + 1;
-    //             } else if(state->type == STRING_CMP_NEQ) {
-    //                 parser_reset(end_of_line_parser);
-    //             }
-    //         } else {
-    //             const struct parser_event* state = parser_feed(dot_parser, ptr[i]);// \r\n.
-    //             if(state->type == STRING_CMP_EQ) {
-    //                 parser_reset(dot_parser);
-    //             } else {
-    //                 if(state->type == STRING_CMP_NEQ)
-    //                     parser_reset(dot_parser);
-                    
-    //                 write_ptr[write_index++] = ptr[i];
-    //             }
-    //         }
-    //     }
-    //     pop3_ptr->transform.write_size = write_index;
-    //     pop3_ptr->transform.curr_size = write_index;
-    //     buffer_read_adv(&pop3_ptr->origin_to_client, max_size);
-    //     pop3_ptr->transform.skipped_line = true;
-    // }
-
     
-    ptr = buffer_read_ptr(&pop3_ptr->transform.write_buff, &max_size);//pop3_ptr->transform.write_ptr; //TODO ver de hacer un mejor manejo de estructuras
+    ptr = buffer_read_ptr(&pop3_ptr->transform.write_buff, &max_size);//TODO ver de hacer un mejor manejo de estructuras
 
     ssize_t bytes_sent = write(pop3_ptr->transform.write_fd, ptr, max_size);
     if (bytes_sent < 0)
@@ -1115,9 +1112,7 @@ static int transform_write(struct selector_key * key) {
     if (buffer_can_read(&pop3_ptr->transform.write_buff))
         return TRANSFORM;
 
-    // pop3_ptr->transform.curr_size -= bytes_sent;
-    // pop3_ptr->transform.write_ptr += bytes_sent;
-    if(pop3_ptr->transform.found_end) { 
+    if (pop3_ptr->transform.found_end) { 
         //free(pop3_ptr->transform.write_ptr - pop3_ptr->transform.write_size);
         close(pop3_ptr->transform.write_fd);
         // TODO destroy buffer
@@ -1136,8 +1131,11 @@ static int transform_write(struct selector_key * key) {
     return RESPONSE;
 }
 
-static int transform_read(struct selector_key * key) {
+static int transform_read(struct selector_key * key) { // TODO falta terminar esto
     struct pop3 *pop3_ptr = ATTACHMENT(key);
+
+    fprintf(stderr, "Entre al transform read\n");
+
 
     size_t max_size;
     uint8_t * ptr;
@@ -1150,11 +1148,17 @@ static int transform_read(struct selector_key * key) {
         pop3_ptr->transform.dot_parser = parser_init(parser_no_classes(), dot_parser_def);
     }
 
-    fprintf(stderr, "Por leer del slave fd : %d\n", pop3_ptr->transform.read_fd);
-
     ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
-    uint8_t * read_ptr = malloc(sizeof(uint8_t) * max_size/2); //TODO revisar size
-    ssize_t read_chars = read(pop3_ptr->transform.read_fd, read_ptr, max_size/2);
+    if (max_size <= 1) {
+        if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || 
+            selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE;
+
+        return RESPONSE;
+    }
+
+    uint8_t * read_ptr = malloc(sizeof(uint8_t) * max_size / 2); // TODO revisar size
+    ssize_t read_chars = read(pop3_ptr->transform.read_fd, read_ptr, max_size / 2);
     if (read_chars < 0) {
         perror("LEER: ");
         return FAILURE;
@@ -1162,6 +1166,7 @@ static int transform_read(struct selector_key * key) {
 
     if (read_chars > 0) {
         ssize_t write_idx = 0;
+
         for (ssize_t i = 0; i < read_chars; i++) {
             const struct parser_event* state = parser_feed(pop3_ptr->transform.dot_parser, read_ptr[i]);
             if(state->type == STRING_CMP_EQ) {
@@ -1169,21 +1174,38 @@ static int transform_read(struct selector_key * key) {
                 parser_reset(pop3_ptr->transform.dot_parser);
             } else if(state->type == STRING_CMP_NEQ) {
                 parser_reset(pop3_ptr->transform.dot_parser);
+                if (read_ptr[i] == '\r')
+                    parser_feed(pop3_ptr->transform.dot_parser, '\r');
             }
             ptr[write_idx++] = read_ptr[i];
         }
+
         free(read_ptr);
         buffer_write_adv(&pop3_ptr->origin_to_client, write_idx);
-        return TRANSFORM;
+
+        if(buffer_can_write(&pop3_ptr->origin_to_client))
+            return TRANSFORM;
+        
+        if (selector_set_interest(key->s, pop3_ptr->transform.read_fd, OP_NOOP) != SELECTOR_SUCCESS || 
+            selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE;
+            
+        return RESPONSE;
     }
 
     close(pop3_ptr->transform.read_fd);
     free(read_ptr);
 
-    ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
-    char *response = ".\r\n"; 
-    memcpy(ptr, response, 3);
-    buffer_write_adv(&pop3_ptr->origin_to_client, 3);
+    pop3_ptr->orig.response.is_done = true;
+    pop3_ptr->orig.response.send_multi = true;
+
+    // ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size); // TODO aca capaz no tengo espacio todavia
+    // if (max_size < 5) {
+
+    // }
+    // char *response = ".\r\n"; 
+    // memcpy(ptr, response, 3);
+    // buffer_write_adv(&pop3_ptr->origin_to_client, 3);
 
     if (selector_unregister_fd(key->s, pop3_ptr->transform.read_fd) != SELECTOR_SUCCESS || 
         selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
