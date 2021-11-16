@@ -642,11 +642,6 @@ static int request_read(struct selector_key* key) {
             }
         }
 
-        if (selector_unregister_fd(key->s, pop3_ptr->client_fd) != SELECTOR_SUCCESS ||
-            selector_unregister_fd(key->s, pop3_ptr->origin_fd) != SELECTOR_SUCCESS)
-            return FAILURE;
-        
-        pop3_done(key);
         return DONE;
     }
 
@@ -713,7 +708,7 @@ static void find_user(struct pop3* pop3_ptr, uint8_t * command, uint8_t len){
 
     memcpy(pop3_ptr->user, command + index + 1, len - index - 2);
     pop3_ptr->user[len - index - 2 - 1] = 0;
-    fprintf(stderr, (const char*)pop3_ptr->user);
+    fprintf(stderr, "%s", (const char*) pop3_ptr->user);
 }
 
 static int request_write(struct selector_key* key){
@@ -1354,15 +1349,15 @@ static void pop3_done(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
     parser_destroy(pop3_ptr->capa.end_of_multiline_parser);
     pop3_ptr->capa.end_of_multiline_parser = NULL;
-    pop3_destroy(pop3_ptr);
     for (unsigned i = 0; i < N(fds); i++) {
         if (fds[i] != -1) {
-            if (SELECTOR_SUCCESS != selector_unregister_fd(key->s, fds[i])) {
+            if (selector_unregister_fd(key->s, fds[i]) != SELECTOR_SUCCESS) {
                 abort();
             }
             close(fds[i]);
         }
     }
+    pop3_destroy(pop3_ptr);
 }
 
 static void pop3_destroy_(struct pop3* s) {
