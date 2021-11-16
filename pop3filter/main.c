@@ -1,4 +1,4 @@
-#include "include/main.h"
+#include <main.h>
 
 proxy_configuration_ptr proxy_config;
 static bool done = false;
@@ -132,21 +132,21 @@ int main(int argc, char *argv[]) {
     int ret = 0;
 
 finally:
-        if(status != SELECTOR_SUCCESS) {
-            fprintf(stderr, "%s: %s\n", (error_message == NULL) ? "": error_message,
-                                        status == SELECTOR_IO ? strerror(errno) : selector_error(status));
-            ret = 2;
-        } else if(error_message) {
-            perror(error_message);
-            ret = 1;
-        }
-        destroy_parser_defs();
-        if(selector != NULL) {
-            selector_destroy(selector);
-        }
-        selector_close();
-        if(server >= 0) {
-            close(server);
-        }
-        return ret;
+    if(status != SELECTOR_SUCCESS) {
+        fprintf(stderr, "%s: %s\n", (error_message == NULL) ? "": error_message,
+                                    status == SELECTOR_IO ? strerror(errno) : selector_error(status));
+        ret = 2;
+    } else if(error_message) {
+        perror(error_message);
+        ret = 1;
+    }
+    destroy_parser_defs();
+    if(selector != NULL) {
+        selector_destroy(selector);
+    }
+    selector_close();
+    if(server >= 0) {
+        close(server);
+    }
+    return ret;
 }

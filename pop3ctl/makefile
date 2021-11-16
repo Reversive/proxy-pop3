@@ -1,6 +1,6 @@
 include makefile.inc
 
-BINARY	= pop3filter
+BINARY	= pop3ctl
 SOURCES = $(wildcard *.c)
 OBJECTS = $(SOURCES:.c=.o)
 rm      = rm -rf

@@ -1,4 +1,4 @@
-#include "include/pop3nio.h"
+#include <pop3nio.h>
 
 #define ATTACHMENT(key) ( (struct pop3 *)(key)->data)
 #define BUFFER_SIZE 1024

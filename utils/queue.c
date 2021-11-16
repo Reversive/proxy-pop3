@@ -1,4 +1,4 @@
-#include "include/queue.h"
+#include <queue.h>
 
 command_queue new_command_queue(){
     return calloc(1, sizeof(t_queue));

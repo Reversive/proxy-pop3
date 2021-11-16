@@ -14,15 +14,15 @@
 #include <netdb.h>
 #include <fcntl.h>
 
-#include "../utils/include/buffer.h"
-#include "../utils/include/stm.h"
-#include "../utils/include/netutils.h"
-#include "../utils/include/selector.h"
-#include "../utils/include/data_structures.h"
-#include "../utils/include/logger.h"
-#include "../utils/include/parser.h"
-#include "../utils/include/parser_utils.h"
-#include "../utils/include/queue.h"
+#include <buffer.h>
+#include <stm.h>
+#include <netutils.h>
+#include <selector.h>
+#include <data_structures.h>
+#include <logger.h>
+#include <parser.h>
+#include <parser_utils.h>
+#include <queue.h>
 
 #define MAX_CONNECTIONS 250
 #define N(x) (sizeof(x)/sizeof((x)[0]))
