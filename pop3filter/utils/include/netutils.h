@@ -17,9 +17,7 @@
 + * @param nport puerto en network byte order
 + *
 + */
-const char *
-sockaddr_to_human(char *buff, const size_t buffsize,
-                  const struct sockaddr *addr);
+const char * sockaddr_to_human(char *buff, const size_t buffsize, const struct sockaddr *addr);
 
 
 

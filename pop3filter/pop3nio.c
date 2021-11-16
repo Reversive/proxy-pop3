@@ -391,16 +391,23 @@ static void* blocking_resolve_origin(void* k) {
             .ai_next = NULL,
     };
 
+    pop3_ptr->current_res = NULL; 
+
     char origin_port[7] = { 0 };
     if (snprintf(origin_port, sizeof(origin_port), "%hu", proxy_config->origin_server_port) < 0) {
-        fprintf(stderr, "Error parseando puerto");
+        log(ERROR, "%s %hu", "Could not parse port", proxy_config->origin_server_port);
+        goto finally;
     }
 
     if (getaddrinfo(proxy_config->origin_server_address, origin_port,
         &hints, &pop3_ptr->origin_resolution) != 0) {
-        fprintf(stderr, "Domain name resolution error\n");
+        log(ERROR, "%s %s:%s", "Domain name resolution error for domain", proxy_config->origin_server_address, origin_port);
+        goto finally;
     }
+    
     pop3_ptr->current_res = pop3_ptr->origin_resolution;
+    
+finally:
     selector_notify_block(key->s, key->fd);
     free(k);
     return NULL;
@@ -410,9 +417,12 @@ void send_error(int fd, const char* error) {
     send(fd, error, strlen(error), MSG_NOSIGNAL);
 }
 
+
 static int connect_to_origin_by_ip(struct selector_key *key, int family, void *sock_addr, socklen_t sock_addr_size ) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
     int sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
+    char buff[SOCKADDR_TO_HUMAN_MIN];
+
     if (sock >= 0) {
         errno = 0;
         if (selector_fd_set_nio(sock) == -1) {
@@ -427,20 +437,23 @@ static int connect_to_origin_by_ip(struct selector_key *key, int family, void *s
             return CONNECT;
         } else if(ret == 0) {
             pop3_ptr->origin_fd = sock;
-            if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
-                goto ip_connect_fail;     
+            if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS ||
+                selector_register(key->s, sock, &pop3_handler, OP_READ, key->data) != SELECTOR_SUCCESS){
 
-            if (selector_register(key->s, sock, &pop3_handler, OP_READ, key->data) != SELECTOR_SUCCESS)
                 goto ip_connect_fail;
-                   
+            }
+
+            log(INFO, "Client %s connected to origin %s", 
+                sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address),
+                sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) sock_addr));
+  
             return HELLO;
-        } else {
-            log(DEBUG, "%d", errno);
-            goto ip_connect_fail;
         }
     }
 ip_connect_fail:
-    perror("Error: ");
+    log(ERROR, "Client %s could not connect to origin %s:%hu",
+        sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address),
+        proxy_config->origin_server_address, proxy_config->origin_server_port);
     if(sock != -1)
         close(sock);
 
@@ -468,11 +481,10 @@ static int resolve_origin(struct selector_key* key) {
     }
 
     memcpy(k, key, sizeof(*k));
-    if (pthread_create(&tid, 0, blocking_resolve_origin, k) == -1) {
-        return FAILURE;
-    }
-    else {
-        selector_set_interest_key(key, OP_NOOP);
+    if (pthread_create(&tid, 0, blocking_resolve_origin, k) == -1 
+        || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS){
+        
+        return FAILURE_WITH_MESSAGE; // TODO mensaje para el cliente
     }
     return RESOLVE_ORIGIN;
 }
@@ -506,6 +518,11 @@ connect_fail:
     if(sock == -1) {
         freeaddrinfo(pop3_ptr->origin_resolution);
         pop3_ptr->error_message.message = "-ERR Connection refused.\r\n";
+    
+        char buff[SOCKADDR_TO_HUMAN_MIN];
+        log(ERROR, "Client %s could not connect to origin %s:%hu",
+            sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address),
+            proxy_config->origin_server_address, proxy_config->origin_server_port);
         if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
 
@@ -524,11 +541,19 @@ static int connection(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
     int error = 0;
     socklen_t len = sizeof(error);
+
+    char buff[SOCKADDR_TO_HUMAN_MIN]; // TODO podria ser una funcion print_connection
+
     if (getsockopt(key->fd, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
         selector_set_interest_key(key, OP_NOOP);
         pop3_ptr->current_res = pop3_ptr->current_res->ai_next;
         if(pop3_ptr->current_res == NULL) {
             pop3_ptr->error_message.message = "-ERR Connection refused.\r\n";
+
+            log(ERROR, "Client %s could not connect to origin %s:%hu",
+                sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address),
+                proxy_config->origin_server_address, proxy_config->origin_server_port);
+                
             if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
                 return FAILURE;
             
@@ -536,16 +561,22 @@ static int connection(struct selector_key* key) {
         }
         return connect_to_origin(key);
     }
+        
     if(pop3_ptr->origin_resolution != NULL) {
         freeaddrinfo(pop3_ptr->origin_resolution);
         pop3_ptr->origin_resolution = NULL;
     }
 
     historic_connections++;
-
+    
     pop3_ptr->origin_fd = key->fd;
     if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS)
         return FAILURE;
+    
+    log(INFO, "Client %s connected to origin %s:%hu",
+        sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address),
+        proxy_config->origin_server_address, proxy_config->origin_server_port);
+
     return HELLO;
 }
 
@@ -593,9 +624,9 @@ static int hello_read(struct selector_key* key) {
     }
     
     buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
-
     return HELLO;
 }
+
 static int hello_write(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
 
@@ -615,7 +646,9 @@ static int hello_write(struct selector_key* key) {
     transferred_bytes += sent_bytes;
 
     if(buffer_pending_read(&pop3_ptr->origin_to_client) == 0) {
-        if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS){
+        if(selector_set_interest_key(key, OP_READ) != SELECTOR_SUCCESS 
+            || selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS){
+            
             return FAILURE;
         }
         return REQUEST;
@@ -638,15 +671,16 @@ static int request_read(struct selector_key* key) {
         
         return FAILURE_WITH_MESSAGE;
     } else if (read_chars == 0) {
-        fprintf(stderr, "Client unsubscribed\n");
+        char buff[SOCKADDR_TO_HUMAN_MIN];
+        log(INFO, "Client %s disconnected",
+            sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address));
+            
         current_connections--;
         if(current_connections == MAX_CONNECTIONS - 1) {
             if (selector_set_interest(key->s, server, OP_READ) != SELECTOR_SUCCESS) {
-                fprintf(stderr, "FATAL: Unable to resuscribe to passive socket\r\n"); //TODO ver que hacer
-                exit(1);
+                log(FATAL, "%s", "Unable to resuscribe to passive socket");
             }
         }
-
         return DONE;
     }
 
@@ -713,7 +747,6 @@ static void find_user(struct pop3* pop3_ptr, uint8_t * command, uint8_t len){
 
     memcpy(pop3_ptr->user, command + index + 1, len - index - 2);
     pop3_ptr->user[len - index - 2 - 1] = 0;
-    fprintf(stderr, "%s", (const char*) pop3_ptr->user);
 }
 
 static int request_write(struct selector_key* key){
@@ -1305,6 +1338,7 @@ static struct pop3* pop3_new(int client_fd) {
         pool = pool->next;
         pop3_ptr->next = 0;
     }
+
     memset(pop3_ptr, 0x00, sizeof(*pop3_ptr));
     pop3_ptr->origin_fd = -1;
     pop3_ptr->client_fd = client_fd;
