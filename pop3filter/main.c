@@ -4,7 +4,6 @@ proxy_configuration_ptr proxy_config;
 static bool done = false;
 int server = -1;
 
-
 static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);
     done = true;
@@ -13,10 +12,12 @@ static void sigterm_handler(const int signal) {
 int main(int argc, char *argv[]) {
     proxy_config = parse_options(argc, argv);
     close(STDIN);
+    
     const char *error_message   = NULL;
     selector_status status      = SELECTOR_SUCCESS;
     fd_selector selector        = NULL;
     fprintf(stdout, "Listening on TCP port %d\n", proxy_config->pop3_listen_port);
+
     struct addrinfo address_criteria;
 	memset(&address_criteria, 0, sizeof(address_criteria));
 	address_criteria.ai_family = AF_INET6;
@@ -38,7 +39,6 @@ int main(int argc, char *argv[]) {
 
     init_parser_defs();
 
-//	int server = -1;
 	for (struct addrinfo* addr = server_address; addr != NULL && server == -1; addr = addr->ai_next) {
 		errno = 0;
 		server = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
@@ -73,7 +73,6 @@ int main(int argc, char *argv[]) {
 	freeaddrinfo(server_address);
     if(server == -1)
         goto finally;
-    //codigo nuestro
 
     if(listen(server, QUEUE_SIZE) < 0) {
         error_message = "Unable to listen";
@@ -101,13 +100,11 @@ int main(int argc, char *argv[]) {
         goto finally;
     }
 
-
     selector = selector_new(SELECTOR_ELEMENTS);
     if(selector == NULL) {
         error_message = "Unable to create selector";
         goto finally;
     }
-
 
     const struct fd_handler pop3_handler = {
             .handle_read    = pop3_passive_accept
@@ -119,7 +116,6 @@ int main(int argc, char *argv[]) {
         error_message = "Failed registering fd";
         goto finally;
     }
-
 
     while(!done) {
         error_message = NULL;

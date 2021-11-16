@@ -2,7 +2,7 @@
 #define DATA_STRUCTURES_H
 
 #include <stdint.h>
-#define VERSION_NUMBER "1.0"
+#define VERSION_NUMBER "0.0.0"
 typedef struct proxy_configuration_t {
     char *error_file_path;
     char *pop3_listen_address;

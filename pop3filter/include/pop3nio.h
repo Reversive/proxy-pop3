@@ -12,6 +12,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <fcntl.h>
+
 #include "../utils/include/buffer.h"
 #include "../utils/include/stm.h"
 #include "../utils/include/netutils.h"

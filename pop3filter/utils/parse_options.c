@@ -43,7 +43,6 @@ proxy_configuration_ptr init_proxy_config() {
     proxy_config->admin_listen_port         = 9090;
     proxy_config->origin_server_port        = 110;
     proxy_config->pop3_filter_command       = NULL;
-    proxy_config->pop3_filter_command       = NULL;
     return proxy_config;
 }
 

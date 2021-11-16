@@ -251,22 +251,22 @@ struct pop3 {
     command_queue           commands_left;
     ssize_t                 unmatched_len;
 
-    struct request_st   request;
+    struct request_st       request;
 
-    struct capa_st      capa;
-    struct response_st  response;
-    struct hello_st     hello_state;
+    struct capa_st          capa;
+    struct response_st      response;
+    struct hello_st         hello_state;
     
     bool                    checked_user;
     uint8_t                 user[40];
 
-    struct transform_st transform;
+    struct transform_st     transform;
 
-    enum pop3_state current_return;
-
+    enum pop3_state         current_return;
 
     uint8_t                 read_buffer[BUFFER_SIZE];
     uint8_t                 write_buffer[BUFFER_SIZE];
+    uint8_t                 transform_buffer[BUFFER_SIZE];
 
     t_buffer                client_to_origin;
     t_buffer                origin_to_client;
@@ -407,7 +407,7 @@ static void* blocking_resolve_origin(void* k) {
 }
 
 void send_error(int fd, const char* error) {
-    send(fd, error, strlen(error), 0);
+    send(fd, error, strlen(error), MSG_NOSIGNAL);
 }
 
 static int connect_to_origin_by_ip(struct selector_key *key, int family, void *sock_addr, socklen_t sock_addr_size ) {
@@ -560,7 +560,12 @@ static void hello_departure(struct selector_key *key) {
     pop3_ptr->response.end_of_line_parser = NULL;
     pop3_ptr->response.is_done = false;
     pop3_ptr->checked_user = false;
+    
+    if(proxy_config->pop3_filter_command != NULL) {
+        buffer_init(&pop3_ptr->transform.write_buff, BUFFER_SIZE, pop3_ptr->transform_buffer);
+    }
 }
+
 
 static int hello_read(struct selector_key* key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
@@ -598,7 +603,7 @@ static int hello_write(struct selector_key* key) {
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
 
     ssize_t sent_bytes;
-    if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
+    if( (sent_bytes = send(key->fd, ptr, max_size, MSG_NOSIGNAL)) == -1) {
         pop3_ptr->error_message.message = "Error writing from origin";
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
@@ -637,7 +642,7 @@ static int request_read(struct selector_key* key) {
         current_connections--;
         if(current_connections == MAX_CONNECTIONS - 1) {
             if (selector_set_interest(key->s, server, OP_READ) != SELECTOR_SUCCESS) {
-                fprintf(stderr, "FATAL: Unable to resuscribe to passive socket\r\n");//TODO ver que hacer
+                fprintf(stderr, "FATAL: Unable to resuscribe to passive socket\r\n"); //TODO ver que hacer
                 exit(1);
             }
         }
@@ -724,7 +729,7 @@ static int request_write(struct selector_key* key){
     }
 
     ssize_t sent_bytes;
-    if( (sent_bytes = send(key->fd, ptr, node->command_len, 0)) == -1) {
+    if( (sent_bytes = send(key->fd, ptr, node->command_len, MSG_NOSIGNAL)) == -1) {
         pop3_ptr->error_message.message = "Error writing to origin"; // TODO cambiar estos por un #DEFINE
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
@@ -835,7 +840,7 @@ static int response_write(struct selector_key* key) {
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->origin_to_client, &max_size);
 
     ssize_t sent_bytes;
-    if( (sent_bytes = send(key->fd, ptr, max_size, 0)) == -1) {
+    if( (sent_bytes = send(key->fd, ptr, max_size, MSG_NOSIGNAL)) == -1) {
         pop3_ptr->error_message.message = "Error writing to client";
 
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
@@ -969,8 +974,6 @@ static int capa_read(struct selector_key* key) {
 static int transform_init(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
 
-    
-
     int in[2], out[2];
     if(pipe(in) == -1 || pipe(out) == -1){ 
         return FAILURE;
@@ -986,7 +989,7 @@ static int transform_init(struct selector_key* key) {
     const pid_t cmdpid = fork();
 
     if (cmdpid == -1) {
-        perror("creating process for user command");
+        perror("creating process for command");
         return FAILURE;
     } else if (cmdpid == 0) {
         int ret = 0;
@@ -996,12 +999,20 @@ static int transform_init(struct selector_key* key) {
         close(in[R]);
         dup2(out[W], STDOUT_FILENO);
         close(out[W]);
-        close(STDERR_FILENO);
 
+        int error_fd = open(proxy_config->error_file_path, O_WRONLY | O_CREAT | O_APPEND | O_NONBLOCK);
+        if (error_fd == -1) {
+            perror("Error opening error file");
+        } else if (dup2(error_fd, STDERR_FILENO) == -1) {
+            perror("Error piping to error file");
+        }
+
+        /*
         if( setvbuf(stdout, NULL, _IONBF, 0) ){
             perror("Unbuff");
             exit(1);
         } 
+        */
         
         for(int i = 3; i < 1024; i++)
             close(i);
@@ -1062,8 +1073,6 @@ static int transform_write(struct selector_key * key) {
             const struct parser_event* state = parser_feed(end_of_line_parser, ptr[i]);
             if(state->type == STRING_CMP_EQ) {
                 pop3_ptr->transform.skipped_line = true;
-                uint8_t * buff_ptr = malloc(sizeof(uint8_t) * BUFFER_SIZE);
-                buffer_init(&pop3_ptr->transform.write_buff, BUFFER_SIZE, buff_ptr); //TODO ver que sea uno ya guardado
                 pop3_ptr->transform.dot_parser = parser_init(parser_no_classes(), dot_parser_def);
                 pop3_ptr->transform.end_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
                 break;
@@ -1138,9 +1147,7 @@ static int transform_write(struct selector_key * key) {
         return TRANSFORM;
 
     if (pop3_ptr->transform.found_end) { 
-        //free(pop3_ptr->transform.write_ptr - pop3_ptr->transform.write_size);
         close(pop3_ptr->transform.write_fd);
-        // TODO destroy buffer
 
         if (selector_unregister_fd(key->s, pop3_ptr->transform.write_fd) != SELECTOR_SUCCESS || 
             selector_set_interest(key->s, pop3_ptr->transform.read_fd, OP_READ) != SELECTOR_SUCCESS)
@@ -1168,6 +1175,7 @@ static int transform_read(struct selector_key * key) {
         buffer_write_adv(&pop3_ptr->origin_to_client, strlen(response));
         pop3_ptr->transform.started_reading = true;
         pop3_ptr->transform.dot_parser = parser_init(parser_no_classes(), dot_parser_def);
+        buffer_compact(&pop3_ptr->transform.write_buff); //TODO, no hace falta en realidad, pensar los casos
     }
 
     ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
@@ -1179,13 +1187,19 @@ static int transform_read(struct selector_key * key) {
         return RESPONSE;
     }
 
-    uint8_t * read_ptr = malloc(sizeof(uint8_t) * max_size / 2);
-    ssize_t read_chars = read(pop3_ptr->transform.read_fd, read_ptr, max_size / 2);
+    size_t read_size;
+    uint8_t * read_ptr = buffer_write_ptr(&pop3_ptr->transform.write_buff, &read_size);//malloc(sizeof(uint8_t) * max_size / 2);
+    read_size = (read_size > max_size) ? max_size : read_size;
+    
+    ssize_t read_chars = read(pop3_ptr->transform.read_fd, read_ptr, read_size / 2);
     if (read_chars < 0) {
         perror("LEER: ");
         return FAILURE;
     }
 
+    buffer_write_adv(&pop3_ptr->transform.write_buff, read_chars);
+    read_ptr = buffer_read_ptr(&pop3_ptr->transform.write_buff, &read_size);
+    
     if (read_chars > 0) {
         ssize_t write_idx = 0;
 
@@ -1202,7 +1216,7 @@ static int transform_read(struct selector_key * key) {
             ptr[write_idx++] = read_ptr[i];
         }
 
-        free(read_ptr);
+        buffer_read_adv(&pop3_ptr->transform.write_buff, read_size);
         buffer_write_adv(&pop3_ptr->origin_to_client, write_idx);
 
         if(buffer_can_write(&pop3_ptr->origin_to_client))
@@ -1216,7 +1230,7 @@ static int transform_read(struct selector_key * key) {
     }
 
     close(pop3_ptr->transform.read_fd);
-    free(read_ptr);
+    buffer_read_adv(&pop3_ptr->transform.write_buff, read_size);
 
     pop3_ptr->response.is_done = true;
 
@@ -1347,6 +1361,7 @@ static void pop3_done(struct selector_key* key) {
             ATTACHMENT(key)->origin_fd,
     };
     struct pop3* pop3_ptr = ATTACHMENT(key);
+
     parser_destroy(pop3_ptr->capa.end_of_multiline_parser);
     pop3_ptr->capa.end_of_multiline_parser = NULL;
     for (unsigned i = 0; i < N(fds); i++) {
