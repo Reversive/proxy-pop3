@@ -256,6 +256,9 @@ struct pop3 {
     struct capa_st      capa;
     struct response_st  response;
     struct hello_st     hello_state;
+    
+    bool                    checked_user;
+    uint8_t                 user[40];
 
     struct transform_st transform;
 
@@ -302,7 +305,7 @@ static bool multi_arguments(struct pop3 * pop3_ptr) {
     return pop3_ptr->response.has_args;
 }
 
-t_command command_list[] = {{"CAPA", multi_true, CAPA}, {"USER", multi_false, RESPONSE}, {"PASS", multi_false, RESPONSE}, {"LIST", multi_no_arguments, RESPONSE}, 
+t_command command_list[] = {{"CAPA", multi_true, CAPA}, {"USER ", multi_false, RESPONSE}, {"PASS", multi_false, RESPONSE}, {"LIST", multi_no_arguments, RESPONSE}, 
     {"RETR", multi_arguments, RESPONSE}, {"DELE", multi_false, RESPONSE}, {"TOP", multi_arguments, RESPONSE}, {"UIDL", multi_no_arguments, RESPONSE}, 
     {"NOOP", multi_false, RESPONSE}, {"QUIT", multi_false, RESPONSE}, {"RSET", multi_false, RESPONSE}, {"STAT", multi_false, RESPONSE}};
 
@@ -556,7 +559,7 @@ static void hello_departure(struct selector_key *key) {
     pop3_ptr->may_multi = true;
     pop3_ptr->response.end_of_line_parser = NULL;
     pop3_ptr->response.is_done = false;
-
+    pop3_ptr->checked_user = false;
 }
 
 static int hello_read(struct selector_key* key) {
@@ -701,12 +704,30 @@ static int request_read(struct selector_key* key) {
     return REQUEST;
 }
 
+static void find_user(struct pop3* pop3_ptr, uint8_t * command, uint8_t len){
+    uint8_t index;
+    for(index = 0; index < len; index++){
+        if(command[index] == ' ')
+            break;
+    }
+
+    memcpy(pop3_ptr->user, command + index + 1, len - index - 2);
+    pop3_ptr->user[len - index - 2 - 1] = 0;
+    fprintf(stderr, (const char*)pop3_ptr->user);
+}
+
 static int request_write(struct selector_key* key){
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     size_t max_size;
     uint8_t* ptr = buffer_read_ptr(&pop3_ptr->client_to_origin, &max_size);
 
     command_node node = peek(pop3_ptr->commands_left);
+
+    if(node->command == CMD_USER && !pop3_ptr->checked_user) {
+        find_user(pop3_ptr, ptr, node->command_len);
+        pop3_ptr->checked_user = true;
+    }
+
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, node->command_len, 0)) == -1) {
         pop3_ptr->error_message.message = "Error writing to origin"; // TODO cambiar estos por un #DEFINE
@@ -726,6 +747,11 @@ static int request_write(struct selector_key* key){
         }
         pop3_ptr->response.has_args = node->has_args;
         pop3_ptr->response.current_command = node->command;
+        
+        if(node->command == CMD_USER && pop3_ptr->checked_user) { //TODO si me mandan user despues de loguearse, me quedo con el equivocado
+            pop3_ptr->checked_user = false;
+        }
+
         free(node);
 
         return (pop3_ptr->response.current_command == -1) ? RESPONSE : command_list[pop3_ptr->response.current_command].response_state;
@@ -947,6 +973,9 @@ static int capa_read(struct selector_key* key) {
 
 static int transform_init(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
+
+    
+
     int in[2], out[2];
     if(pipe(in) == -1 || pipe(out) == -1){ 
         return FAILURE;
@@ -981,14 +1010,21 @@ static int transform_init(struct selector_key* key) {
         
         for(int i = 3; i < 1024; i++)
             close(i);
+
+        char envp[3][256] = {"POP3_USERNAME=", "POP3FILTER_VERSION=", "POP3_SERVER="};
         
-        if(execl("/bin/sh", "sh", "-c", proxy_config->pop3_filter_command, (char *) 0) == -1) {
+        strcat(envp[0], (char *) pop3_ptr->user);
+        strcat(envp[1], VERSION_NUMBER);
+        strcat(envp[2], proxy_config->origin_server_address);
+        
+        char* env_list[] = { envp[0], envp[1], envp[2], NULL };
+
+        if(execle("/bin/sh", "sh", "-c", proxy_config->pop3_filter_command, (char *) NULL, env_list) == -1) {
             perror("executing command");
             close(in[R]);
             close(out[W]);
             ret = 1;
         }
-
         exit(ret);
     } 
 
