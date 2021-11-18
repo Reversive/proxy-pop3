@@ -67,4 +67,6 @@ int stm_handler_write(struct state_machine *, key_ptr);
 /* Indica que ocurrió el evento block. retorna nuevo id de nuevo estado. */
 int stm_handler_block(struct state_machine *, key_ptr);
 
+void jump(struct state_machine * stm, int next, key_ptr key);
+
 #endif //PROXY_STM_H

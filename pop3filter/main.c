@@ -90,7 +90,7 @@ int main(int argc, char *argv[]) {
     const struct selector_init conf = {
             .signal = SIGALRM,
             .select_timeout = {
-                    .tv_sec  = 10,
+                    .tv_sec  = 20,
                     .tv_nsec = 0,
             },
     };
@@ -107,7 +107,7 @@ int main(int argc, char *argv[]) {
     }
 
     const struct fd_handler pop3_handler = {
-            .handle_read    = pop3_passive_accept
+            .handle_read    = pop3_passive_accept,
     };
 
     status = selector_register(selector, server, &pop3_handler, OP_READ, NULL);
@@ -117,9 +117,16 @@ int main(int argc, char *argv[]) {
         goto finally;
     }
 
+    time_t last_activity = time(NULL);
+
     while(!done) {
         error_message = NULL;
         status = selector_select(selector);
+        time_t current_activity = time(NULL);
+        if(difftime(current_activity, last_activity) >= TIMEOUT/4) {
+            last_activity = current_activity;
+            selector_notify_timeout(selector); // Hacemos trigger del handle_timeout
+        }
         if(status != SELECTOR_SUCCESS) {
             error_message = "Serving";
             goto finally;

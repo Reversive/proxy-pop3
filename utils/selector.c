@@ -574,3 +574,19 @@ selector_fd_set_nio(const int fd) {
     }
     return ret;
 }
+
+
+void selector_notify_timeout(fd_selector s) {
+    if(s == NULL) return;
+    struct selector_key key = {
+        .s = s,
+    };
+    for(int i = 0; i < s->max_fd; i++) {
+        struct item *item   = s->fds + i;
+        key.fd              = item->fd;
+        key.data            = item->data;
+        if(ITEM_USED(item) && item->handler->handle_timeout != NULL) {
+            item->handler->handle_timeout(&key);
+        }
+    }
+}

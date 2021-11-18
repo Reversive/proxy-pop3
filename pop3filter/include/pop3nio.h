@@ -13,7 +13,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <fcntl.h>
-
+#include <time.h>
 #include <buffer.h>
 #include <stm.h>
 #include <netutils.h>
@@ -25,6 +25,7 @@
 #include <queue.h>
 
 #define MAX_CONNECTIONS 250
+#define TIMEOUT 120.0 
 #define N(x) (sizeof(x)/sizeof((x)[0]))
 
 void pop3_passive_accept(struct selector_key *key);

@@ -18,6 +18,8 @@ static void             pop3_read(struct selector_key* key);
 static void             pop3_write(struct selector_key* key);
 static void             pop3_block(struct selector_key* key);
 static void             pop3_close(struct selector_key* key);
+static void             pop3_timeout(struct selector_key* key);
+static void             update_last_activity(struct selector_key* key);
 static struct pop3*     pop3_new(int client_fd);
 static void             pop3_destroy_(struct pop3* s);
 static void             pop3_destroy(struct pop3* s);
@@ -38,6 +40,7 @@ static int              response_read(struct selector_key* key);
 static int              transform_read(struct selector_key* key);
 static int              transform_write(struct selector_key* key);
 static int              transform_init(struct selector_key* key);
+static int              write_transform_error(struct selector_key* key);
 
 static const unsigned   max_pool = 50;
 static unsigned         pool_size = 0;
@@ -127,6 +130,7 @@ enum pop3_state {
        *       - FAILURE       if there's any FAILURE
        */
        TRANSFORM,
+       TRANSFORM_FAILURE,
        DONE,
        FAILURE_WITH_MESSAGE,
        FAILURE
@@ -168,6 +172,10 @@ static const struct state_definition handlers[] = {
         .state          = TRANSFORM,
         .on_read_ready  = transform_read,
         .on_write_ready = transform_write
+    },
+    {
+        .state          = TRANSFORM_FAILURE,
+        .on_write_ready = write_transform_error,
     },
     {
         .state          = DONE,
@@ -256,6 +264,7 @@ struct pop3 {
     struct capa_st          capa;
     struct response_st      response;
     struct hello_st         hello_state;
+    time_t                  last_activity;
     
     bool                    checked_user;
     uint8_t                 user[40];
@@ -277,10 +286,11 @@ struct pop3 {
 };
 
 static const struct fd_handler pop3_handler = {
-        .handle_read = pop3_read,
-        .handle_write = pop3_write,
-        .handle_close = pop3_close,
-        .handle_block = pop3_block,
+        .handle_read    = pop3_read,
+        .handle_write   = pop3_write,
+        .handle_close   = pop3_close,
+        .handle_block   = pop3_block,
+        .handle_timeout = pop3_timeout
 };
 
 typedef struct t_command {
@@ -1008,8 +1018,8 @@ static int transform_init(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
 
     int in[2], out[2];
-    if(pipe(in) == -1 || pipe(out) == -1){ 
-        return FAILURE;
+    if(pipe(in) == -1 || pipe(out) == -1) { 
+        return TRANSFORM_FAILURE;
     }
     pop3_ptr->transform.write_fd = in[W];
     pop3_ptr->transform.read_fd = out[R];
@@ -1040,12 +1050,6 @@ static int transform_init(struct selector_key* key) {
             perror("Error piping to error file");
         }
 
-        /*
-        if( setvbuf(stdout, NULL, _IONBF, 0) ){
-            perror("Unbuff");
-            exit(1);
-        } 
-        */
         
         for(int i = 3; i < 1024; i++)
             close(i);
@@ -1278,6 +1282,12 @@ static int transform_read(struct selector_key * key) {
 }
 
 
+static int write_transform_error(struct selector_key* key) {
+    //struct pop3 *pop3_ptr = ATTACHMENT(key);
+    return FAILURE;
+}
+
+
 static int write_error_message(struct selector_key *key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     if(pop3_ptr->error_message.message == NULL)
@@ -1347,6 +1357,7 @@ static struct pop3* pop3_new(int client_fd) {
     pop3_ptr->stm.max_state = FAILURE;
     pop3_ptr->stm.states = handlers;
     pop3_ptr->capa.supports_pipelining = false;
+    pop3_ptr->last_activity = time(NULL);
     stm_init(&pop3_ptr->stm);
 
     buffer_init(&pop3_ptr->client_to_origin, BUFFER_SIZE, pop3_ptr->read_buffer);
@@ -1357,7 +1368,25 @@ static struct pop3* pop3_new(int client_fd) {
     return pop3_ptr;
 }
 
+
+static void update_last_activity(struct selector_key* key) {
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    pop3_ptr->last_activity = time(NULL);
+}
+
+static void pop3_timeout(struct selector_key* key) {
+    struct pop3 *pop3_ptr = ATTACHMENT(key);
+    if(pop3_ptr != NULL && difftime(time(NULL), pop3_ptr->last_activity) >= TIMEOUT) {
+        log(INFO, "%s\n", "Disconnecting client for inactivity");
+        pop3_ptr->error_message.message = "-ERR Disconnected for inactivity.\r\n";
+        if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            pop3_done(key);
+        jump(&pop3_ptr->stm, FAILURE_WITH_MESSAGE, key);
+    }
+}
+
 static void pop3_read(struct selector_key* key) {
+    update_last_activity(key);
     struct state_machine* stm = &ATTACHMENT(key)->stm;
     const enum pop3_state st = stm_handler_read(stm, key);
 
@@ -1367,6 +1396,7 @@ static void pop3_read(struct selector_key* key) {
 }
 
 static void pop3_write(struct selector_key* key) {
+    update_last_activity(key);
     struct state_machine* stm = &ATTACHMENT(key)->stm;
     const enum pop3_state st = stm_handler_write(stm, key);
 
@@ -1376,6 +1406,7 @@ static void pop3_write(struct selector_key* key) {
 }
 
 static void pop3_block(struct selector_key* key) {
+    update_last_activity(key);
     struct state_machine* stm = &ATTACHMENT(key)->stm;
     const enum pop3_state st = stm_handler_block(stm, key);
 

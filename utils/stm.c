@@ -33,7 +33,7 @@ inline static void handle_first(struct state_machine * stm, key_ptr key) {
     }
 }
 
-inline static void jump(struct state_machine * stm, int next, key_ptr key) {
+void jump(struct state_machine * stm, int next, key_ptr key) {
     if (next > stm->max_state) {
         abort();
     }
