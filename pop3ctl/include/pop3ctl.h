@@ -1,5 +1,5 @@
-#ifndef CLIENT_H
-#define CLIENT_H
+#ifndef POP3CTL_H
+#define POP3CTL_H
 
 #include <stdint.h>
 
@@ -11,6 +11,6 @@ typedef struct client_configuration_t {
 
 typedef struct client_configuration_t * client_config_ptr;
 
-#include <client_utils.h>
+#include <pop3ctl_utils.h>
 
 #endif

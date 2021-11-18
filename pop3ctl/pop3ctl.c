@@ -1,4 +1,4 @@
-#include <client.h>
+#include <pop3ctl.h>
 
 client_config_ptr client_config;
 

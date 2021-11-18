@@ -1,4 +1,4 @@
-#include <client_utils.h>
+#include <pop3ctl_utils.h>
 
 #define HAS_VALID_ARG(k) ((k) == 'P' || (k) == 't')
 enum ERROR_CODES { STATUS_SUCCESS, STATUS_ERROR };
@@ -13,7 +13,7 @@ void print_client_version(int argc) {
 }
 
 void print_client_usage() {
-    printf("./client [ POSIX style options ] <admin-server> \n"
+    printf("./pop3ctl [ POSIX style options ] <admin-server> \n"
            "POSIX style options: \n"
            "\t-h Prints out help and exits. \n"
            "\t-P [ADMIN PORT] Specifies the port where the admin server is located. By default is 9090. \n"

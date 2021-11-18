@@ -82,7 +82,7 @@ enum pop3_state {
       HELLO,
 
       /*
-       * Asks supporting features to origin server (does it support pipelining?)
+       * Adds pipelining to CAPA origin response if needed
        * Interests:
        *      - OP_READ over origin_fd
        * Transitions:
@@ -1203,7 +1203,7 @@ static int transform_read(struct selector_key * key) {
     uint8_t * ptr;
     if (!pop3_ptr->transform.started_reading) {
         ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
-        char *response = "+OK todo biento\r\n"; // TODO mandar rta real y pasarlo a #DEFINE
+        char *response = "+OK \r\n"; // TODO mandar rta real y pasarlo a #DEFINE
         memcpy(ptr, response, strlen(response));
         buffer_write_adv(&pop3_ptr->origin_to_client, strlen(response));
         pop3_ptr->transform.started_reading = true;
@@ -1385,11 +1385,10 @@ static void pop3_block(struct selector_key* key) {
 }
 
 static void pop3_close(struct selector_key* key) {
-    fprintf(stderr, "Entre al pop3_close\n");
+    return;
 }
 
 static void pop3_done(struct selector_key* key) {
-    fprintf(stderr, "Entre al pop3_done\n");
     const int fds[] = {
             ATTACHMENT(key)->client_fd,
             ATTACHMENT(key)->origin_fd,

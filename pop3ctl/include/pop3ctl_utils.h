@@ -1,9 +1,9 @@
-#ifndef CLIENT_UTILS_H
-#define CLIENT_UTILS_H
+#ifndef POP3CTL_UTILS_H
+#define POP3CTL_UTILS_H
 
 #define VERSION_NUMBER "0.0"
 
-#include <client.h>
+#include <pop3ctl.h>
 #include <getopt.h>
 #include <unistd.h>
 #include <stdio.h>
