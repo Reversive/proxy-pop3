@@ -823,7 +823,7 @@ static int response_read(struct selector_key* key) {
         pop3_ptr->current_return = RESPONSE;
         pop3_ptr->response.write_fd = pop3_ptr->client_fd;
         pop3_ptr->response.read_fd = pop3_ptr->origin_fd;
-
+        
         if (pop3_ptr->response.current_command != -1 && 
             command_list[pop3_ptr->response.current_command].is_multi(pop3_ptr) && ptr[0] == '+') {
             
@@ -898,6 +898,8 @@ static int response_write(struct selector_key* key) {
     if (buffer_can_read(&pop3_ptr->origin_to_client)) // el buffer estará compactado, se puede escribir
         return RESPONSE;
 
+    if(pop3_ptr->response.is_done && pop3_ptr->response.current_command == CMD_QUIT)
+        return DONE;
 
     if(!pop3_ptr->response.is_done){
         if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS ||
@@ -1018,7 +1020,10 @@ static int transform_init(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
 
     int in[2], out[2];
-    if(pipe(in) == -1 || pipe(out) == -1) { 
+    if(pipe(in) == -1 || pipe(out) == -1) {
+        if( selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || 
+            selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE; 
         return TRANSFORM_FAILURE;
     }
     pop3_ptr->transform.write_fd = in[W];
