@@ -551,7 +551,9 @@ static int connection(struct selector_key* key) {
 
     if (getsockopt(key->fd, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
         selector_set_interest_key(key, OP_NOOP);
-        pop3_ptr->current_res = pop3_ptr->current_res->ai_next;
+        if(pop3_ptr->current_res != NULL)
+            pop3_ptr->current_res = pop3_ptr->current_res->ai_next;
+
         if(pop3_ptr->current_res == NULL) {
             pop3_ptr->error_message.message = "-ERR Connection refused.\r\n";
 
@@ -833,6 +835,7 @@ static int response_read(struct selector_key* key) {
                     return FAILURE;
                 if(pop3_ptr->current_return == FLUSH_ORIGIN)
                     return flush_origin(key);
+                    
                 if(pop3_ptr->current_return == RESPONSE)
                     return RESPONSE;
             }
