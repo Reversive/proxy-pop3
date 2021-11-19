@@ -131,7 +131,7 @@ enum pop3_state {
        TRANSFORM,
        TRANSFORM_FAILURE,
        DONE,
-       FAILURE_WITH_MESSAGE,
+       FAILURE_WITH_MESSAGE, // TODO chequeo de estas funciones
        FAILURE
 };
 
@@ -267,6 +267,8 @@ struct pop3 {
     
     bool                    checked_user;
     uint8_t                 user[40];
+    bool                    has_valid_user;
+
 
     struct transform_st     transform;
 
@@ -602,6 +604,7 @@ static void hello_departure(struct selector_key *key) {
     pop3_ptr->response.end_of_line_parser = NULL;
     pop3_ptr->response.is_done = false;
     pop3_ptr->checked_user = false;
+    pop3_ptr->has_valid_user = false;
     
     if(proxy_config->pop3_filter_command != NULL) {
         buffer_init(&pop3_ptr->transform.write_buff, BUFFER_SIZE, pop3_ptr->transform_buffer);
@@ -761,7 +764,7 @@ static int request_write(struct selector_key* key){
 
     command_node node = peek(pop3_ptr->commands_left);
 
-    if(node->command == CMD_USER && !pop3_ptr->checked_user) {
+    if(node->command == CMD_USER && !pop3_ptr->has_valid_user && !pop3_ptr->checked_user) {
         find_user(pop3_ptr, ptr, node->command_len);
         pop3_ptr->checked_user = true;
     }
@@ -833,6 +836,9 @@ static int response_read(struct selector_key* key) {
             pop3_ptr->response.is_positive_response = true;    
             pop3_ptr->response.end_of_line_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
         } else {
+            if (pop3_ptr->response.current_command == CMD_PASS && ptr[0] == '+')
+                pop3_ptr->has_valid_user = true;
+            
             pop3_ptr->response.end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
             pop3_ptr->response.is_positive_response = false;    
         }
@@ -1060,6 +1066,7 @@ static int transform_init(struct selector_key* key) {
         dup2(out[W], STDOUT_FILENO);
         close(out[W]);
 
+        
         int error_fd = open(proxy_config->error_file_path, O_WRONLY | O_CREAT | O_APPEND | O_NONBLOCK);
         if (error_fd == -1) {
             perror("Error opening error file");
@@ -1080,7 +1087,7 @@ static int transform_init(struct selector_key* key) {
         char* env_list[] = { envp[0], envp[1], envp[2], NULL };
 
         if(execle("/bin/sh", "sh", "-c", proxy_config->pop3_filter_command, (char *) NULL, env_list) == -1) {
-            perror("executing command");
+            perror("Error executing command");
             close(in[R]);
             close(out[W]);
             ret = 1;
