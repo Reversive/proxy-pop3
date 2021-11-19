@@ -40,7 +40,7 @@ static int              response_read(struct selector_key* key);
 static int              transform_read(struct selector_key* key);
 static int              transform_write(struct selector_key* key);
 static int              transform_init(struct selector_key* key);
-static int              transform_error_message(struct selector_key* key);
+static int              flush_origin(struct selector_key* key);
 
 static const unsigned   max_pool = 50;
 static unsigned         pool_size = 0;
@@ -50,7 +50,7 @@ static struct           pop3* pool = NULL;
 size_t historic_connections = 0;
 size_t current_connections = 0;
 size_t transferred_bytes = 0;
-
+#define FLUSH_ORIGIN 10
 
 enum pop3_state {
     /*
@@ -130,7 +130,6 @@ enum pop3_state {
        *       - FAILURE       if there's any FAILURE
        */
        TRANSFORM,
-       TRANSFORM_FAILURE,
        DONE,
        FAILURE_WITH_MESSAGE,
        FAILURE
@@ -172,10 +171,6 @@ static const struct state_definition handlers[] = {
         .state          = TRANSFORM,
         .on_read_ready  = transform_read,
         .on_write_ready = transform_write
-    },
-    {
-        .state          = TRANSFORM_FAILURE,
-        .on_read_ready  = transform_error_message,
     },
     {
         .state          = DONE,
@@ -836,8 +831,10 @@ static int response_read(struct selector_key* key) {
 
                 if (pop3_ptr->current_return == FAILURE) 
                     return FAILURE;
-                if(pop3_ptr->current_return == TRANSFORM_FAILURE)
-                    return TRANSFORM_FAILURE;
+                if(pop3_ptr->current_return == FLUSH_ORIGIN)
+                    return flush_origin(key);
+                if(pop3_ptr->current_return == RESPONSE)
+                    return RESPONSE;
             }
                 
             pop3_ptr->response.is_positive_response = true;    
@@ -900,6 +897,7 @@ static int response_write(struct selector_key* key) {
     if (buffer_can_read(&pop3_ptr->origin_to_client)) // el buffer estará compactado, se puede escribir
         return RESPONSE;
 
+    // Hacer handling para que el proxy sepa que termino
     if(pop3_ptr->response.is_done && pop3_ptr->response.current_command == CMD_QUIT)
         return DONE;
 
@@ -1018,23 +1016,56 @@ static int capa_read(struct selector_key* key) {
     return RESPONSE;
 }
 
+static int flush_origin(struct selector_key* key) {
+    struct pop3* pop3_ptr = ATTACHMENT(key);
+    //Ya se consumio todo lo del origin, no hace falta hacer recv del origin
+    if(buffer_can_read(&pop3_ptr->origin_to_client) && pop3_ptr->response.is_done) {
+        buffer_reset(&pop3_ptr->origin_to_client);
+        pop3_ptr->response.end_string = "-ERR Transform failed\r\n";
+        pop3_ptr->response.is_done = true;
+        pop3_ptr->response.end_string_len = 23;
+        if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS ||
+            selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS)
+            return FAILURE;
+        return RESPONSE;
+    }
+    size_t max_size;
+    uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
+    ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
+    if(read_chars == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        log(ERROR, "%s", "Finished flushing origin");
+        buffer_reset(&pop3_ptr->origin_to_client);
+        pop3_ptr->response.end_string = "-ERR Transform failed\r\n";
+        pop3_ptr->response.is_done = true;
+        pop3_ptr->response.end_string_len = 23;
+        if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS ||
+            selector_set_interest(key->s, pop3_ptr->origin_fd, OP_NOOP) != SELECTOR_SUCCESS)
+            return FAILURE;
+        return RESPONSE;
+    } else if (read_chars <= 0) {
+        log(INFO, "%s", "Error flushing origin");
+        pop3_ptr->error_message.message = "Error reading from origin";
+        if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
+            return FAILURE;
+        
+        return FAILURE_WITH_MESSAGE;
+    }
+
+    buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
+    
+    if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_NOOP) != SELECTOR_SUCCESS ||
+        selector_set_interest(key->s, pop3_ptr->origin_fd, OP_READ) != SELECTOR_SUCCESS)
+            return FAILURE;
+    return FLUSH_ORIGIN;
+}
+
 static int transform_init(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
 
     int in[2], out[2];
     if(pipe(in) == -1 || pipe(out) == -1) {
-        if(pop3_ptr->response.is_done) { 
-            log(ERROR, "%s\n", "Pipe failed and already consumed everything from the origin");
-            buffer_reset(&pop3_ptr->origin_to_client);
-            pop3_ptr->response.end_string = "-ERR Transform failed\r\n";
-            pop3_ptr->response.end_string_len = strlen(pop3_ptr->response.end_string);
-            return RESPONSE;
-        }
-        if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_NOOP) != SELECTOR_SUCCESS || 
-            selector_set_interest(key->s, pop3_ptr->origin_fd, OP_READ) != SELECTOR_SUCCESS)
-            return FAILURE;
-        log(ERROR, "%s\n", "Pipe failed and have to consume what's left from the origin...");
-        return TRANSFORM_FAILURE;
+        log(ERROR, "%s\n", "Failed creating pipe, flushing origin...");
+        return flush_origin(key);
     }
     pop3_ptr->transform.write_fd = in[W];
     pop3_ptr->transform.read_fd = out[R];
@@ -1047,8 +1078,8 @@ static int transform_init(struct selector_key* key) {
     const pid_t cmdpid = fork();
 
     if (cmdpid == -1) {
-        perror("creating process for command");
-        return FAILURE;
+        log(ERROR, "%s\n", "Failed forking, flushing origin...");
+        return flush_origin(key);
     } else if (cmdpid == 0) {
         int ret = 0;
         close(in[W]);
@@ -1294,44 +1325,6 @@ static int transform_read(struct selector_key * key) {
     pop3_ptr->response.end_string_len = 3;
 
     return RESPONSE;
-}
-
-
-static int transform_error_message(struct selector_key* key) {
-    struct pop3 *pop3_ptr = ATTACHMENT(key);
-    
-    size_t max_size;
-    uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
-    ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
-    log(ERROR, "Read %ld chars\n", read_chars);
-    if (read_chars <= 0) {
-        pop3_ptr->error_message.message = "Error reading from origin";
-        if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
-            return FAILURE;
-         
-        return FAILURE_WITH_MESSAGE;
-    }
-
-    if(pop3_ptr->response.end_of_line_parser == NULL)
-        pop3_ptr->response.end_of_line_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
-    
-    for(int i = 0; i < read_chars; i++) {
-        const struct parser_event* end_state = parser_feed(pop3_ptr->response.end_of_line_parser, ptr[i]);
-        fprintf(stderr, "%c", ptr[i]);
-        if(end_state->type == STRING_CMP_EQ) {
-            parser_reset(pop3_ptr->response.end_of_line_parser);
-            pop3_ptr->response.end_of_line_parser = NULL;
-            pop3_ptr->response.is_done = true;
-            pop3_ptr->response.end_string = "-ERR Transform failed\r\n";
-            pop3_ptr->response.end_string_len = strlen(pop3_ptr->response.end_string);
-            return RESPONSE;
-        } else if(end_state->type == STRING_CMP_NEQ) {
-            parser_reset(pop3_ptr->response.end_of_line_parser);
-        }
-    }
-
-    buffer_write_adv(&pop3_ptr->origin_to_client, read_chars);
-    return TRANSFORM_FAILURE;
 }
 
 
