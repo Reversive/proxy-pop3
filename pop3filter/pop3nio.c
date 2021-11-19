@@ -685,13 +685,7 @@ static int request_read(struct selector_key* key) {
         char buff[SOCKADDR_TO_HUMAN_MIN];
         log(INFO, "Client %s disconnected",
             sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address));
-            
-        current_connections--;
-        if(current_connections == MAX_CONNECTIONS - 1) {
-            if (selector_set_interest(key->s, server, OP_READ) != SELECTOR_SUCCESS) {
-                log(FATAL, "%s", "Unable to resuscribe to passive socket");
-            }
-        }
+
         return DONE;
     }
 
@@ -896,16 +890,17 @@ static int response_write(struct selector_key* key) {
     if (buffer_can_read(&pop3_ptr->origin_to_client)) // el buffer estará compactado, se puede escribir
         return RESPONSE;
 
-    // Hacer handling para que el proxy sepa que termino
-    if(pop3_ptr->response.is_done && pop3_ptr->response.current_command == CMD_QUIT)
-        return DONE;
-
     if(!pop3_ptr->response.is_done){
         if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS ||
             selector_set_interest(key->s, pop3_ptr->response.read_fd, OP_READ) != SELECTOR_SUCCESS)
             return FAILURE;
 
         return pop3_ptr->current_return;
+    }
+
+    // Hacer handling para que el proxy sepa que termino
+    if(pop3_ptr->response.current_command == CMD_QUIT){
+        return DONE;
     }
 
     if (pop3_ptr->response.end_string_len != 0) {
@@ -1343,9 +1338,10 @@ void pop3_passive_accept(struct selector_key* key) {
         goto fail;
     }
 
+    current_connections++;    
     if(current_connections == MAX_CONNECTIONS && selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
         goto fail;
-        
+
     return;
 
 fail:
@@ -1443,6 +1439,14 @@ static void pop3_done(struct selector_key* key) {
     };
     struct pop3* pop3_ptr = ATTACHMENT(key);
 
+    current_connections--;
+    if(current_connections == MAX_CONNECTIONS - 1) {
+        if (selector_set_interest(key->s, server, OP_READ) != SELECTOR_SUCCESS) {
+            log(FATAL, "%s", "Unable to resuscribe to passive socket");
+        }
+    }
+    // TODO a lot of frees
+    
     parser_destroy(pop3_ptr->capa.end_of_multiline_parser);
     pop3_ptr->capa.end_of_multiline_parser = NULL;
     for (unsigned i = 0; i < N(fds); i++) {
