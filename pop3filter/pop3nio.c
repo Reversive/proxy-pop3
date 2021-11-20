@@ -6,6 +6,8 @@
 #define R 0
 #define W 1
 
+
+
 typedef struct parser* ptr_parser;
 
 struct parser_definition *end_of_line_parser_def;
@@ -1390,7 +1392,7 @@ static void update_last_activity(struct selector_key* key) {
 
 static void pop3_timeout(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
-    if(pop3_ptr != NULL && difftime(time(NULL), pop3_ptr->last_activity) >= TIMEOUT) {
+    if(pop3_ptr != NULL && difftime(time(NULL), pop3_ptr->last_activity) >= client_timeout) {
         log(INFO, "%s\n", "Disconnecting client for inactivity");
         pop3_ptr->error_message.message = "-ERR Disconnected for inactivity.\r\n";
         if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)

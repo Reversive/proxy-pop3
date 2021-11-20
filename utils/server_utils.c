@@ -15,7 +15,7 @@ int setup_server_socket(char * listen_addr, int service, unsigned protocol, bool
 	address_criteria.ai_flags = AI_PASSIVE;
 
     if (is_ipv4) {
-        log(DEBUG, "%s", "Listeis ipv4");
+        log(DEBUG, "%s", "is ipv4");
         address_criteria.ai_family = AF_INET;
     }
     

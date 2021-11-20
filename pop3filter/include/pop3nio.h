@@ -23,9 +23,9 @@
 #include <parser.h>
 #include <parser_utils.h>
 #include <queue.h>
+#include <pop3admin.h>
 
 #define MAX_CONNECTIONS 250
-#define TIMEOUT 120.0 
 #define N(x) (sizeof(x)/sizeof((x)[0]))
 
 void pop3_passive_accept(struct selector_key *key);

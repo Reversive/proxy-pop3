@@ -4,17 +4,19 @@
 #define ADMIN_VERSION ((uint8_t *) "0.0")
 #define ADMIN_TOKEN ((uint8_t *)"SECRETPROX")
 
+#define DGRAM_SIZE 512
+
 typedef struct t_admin_req {
     uint8_t     version[3];
     uint8_t     token[10];
     uint8_t     command;
-    uint8_t *   data;
+    uint8_t     data[DGRAM_SIZE - 14];
 } t_admin_req;
 
 typedef struct t_admin_resp {
     uint8_t     version[3];
     uint8_t     status;
-    uint8_t *   data;
+    uint8_t     data[DGRAM_SIZE - 4];
 } t_admin_resp;
 
 enum admin_commands {

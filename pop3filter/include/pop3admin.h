@@ -9,9 +9,12 @@
 #include <netinet/in.h>
 #include <admin_utils.h>
 
-
 #define BUFFSIZE 1024
 
 void admin_parse(struct selector_key* key);
 
+extern size_t historic_connections;
+extern size_t current_connections;
+extern size_t transferred_bytes;
+extern float  client_timeout;
 #endif

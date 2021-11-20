@@ -8,6 +8,8 @@ int server_6 = -1;
 int admin_4 = -1;
 int admin_6 = -1;
 
+float client_timeout = 120.0;
+
 static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);
     done = true;
@@ -26,7 +28,7 @@ int main(int argc, char *argv[]) {
     fd_selector selector        = NULL;
     fprintf(stdout, "Listening on TCP port %d\n", proxy_config->pop3_listen_port);
 
-    //IN6ADDR_ANY_INIT
+    // //IN6ADDR_ANY_INIT
     if(proxy_config->pop3_listen_address == NULL){
         server_6 = setup_server_socket("::", proxy_config->pop3_listen_port, IPPROTO_TCP, false);
         server_4 = setup_server_socket("0.0.0.0", proxy_config->pop3_listen_port, IPPROTO_TCP, true);
@@ -40,8 +42,8 @@ int main(int argc, char *argv[]) {
         goto finally; //TODO que pasa si tenia que escuchar en las dos si o si?
     
     if(proxy_config->admin_listen_address == NULL){
-        admin_4 = setup_server_socket("127.0.0.1", proxy_config->admin_listen_port, IPPROTO_TCP, true); //TODO pasarlos a define
-        admin_6 = setup_server_socket("::1", proxy_config->admin_listen_port, IPPROTO_TCP, false);
+        admin_4 = setup_server_socket("127.0.0.1", proxy_config->admin_listen_port, IPPROTO_UDP, true); //TODO pasarlos a define
+        admin_6 = setup_server_socket("::1", proxy_config->admin_listen_port, IPPROTO_UDP, false);
     } else if (is_ipv6(proxy_config->pop3_listen_address)){
         admin_6 = setup_server_socket(proxy_config->admin_listen_address, proxy_config->admin_listen_port, IPPROTO_UDP, false);
     } else {
@@ -129,7 +131,7 @@ int main(int argc, char *argv[]) {
         error_message = NULL;
         status = selector_select(selector);
         time_t current_activity = time(NULL);
-        if(difftime(current_activity, last_activity) >= TIMEOUT/4) {
+        if(difftime(current_activity, last_activity) >= client_timeout/4) {
             last_activity = current_activity;
             selector_notify_timeout(selector); // Hacemos trigger del handle_timeout
         }
