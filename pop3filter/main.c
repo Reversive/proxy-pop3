@@ -8,13 +8,16 @@ int server_6 = -1;
 int admin_4 = -1;
 int admin_6 = -1;
 
-
 static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);
     done = true;
 }
 
 int main(int argc, char *argv[]) {
+
+    // t_admin_datagram datagram = *((t_admin_datagram *) &"0000\0holacomova\0\0");
+    // log(DEBUG, "%s-%s-%d", datagram.version, datagram.token, datagram.command);
+
     proxy_config = parse_options(argc, argv);
     close(STDIN);
     

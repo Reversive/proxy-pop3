@@ -7,12 +7,11 @@
 #include <string.h>
 #include <ctype.h>
 #include <netinet/in.h>
+#include <admin_utils.h>
 
 
 #define BUFFSIZE 1024
 
-extern int admin_4;
-extern int admin_6;
 void admin_parse(struct selector_key* key);
 
 #endif

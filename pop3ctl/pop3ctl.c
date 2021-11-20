@@ -35,7 +35,8 @@ int main(int argc, char * argv[]) {
         MSG_CONFIRM, (const struct sockaddr *) &servaddr, 
             sizeof(servaddr));
     printf("Hello message sent.\n");
-           
+    
+
     n = recvfrom(sockfd, (char *) buffer, MAX_LINE, 
                 MSG_WAITALL, (struct sockaddr *) &servaddr,
                 &len);
