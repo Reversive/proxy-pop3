@@ -38,4 +38,9 @@ sock_blocking_write(const int fd, t_buffer_ptr b);
 int
 sock_blocking_copy(const int source, const int dest);
 
+
+int is_ipv6(const char* host);
+
+int is_ipv4(const char* host);
+
 #endif

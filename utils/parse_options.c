@@ -37,8 +37,8 @@ void print_help() {
 proxy_configuration_ptr init_proxy_config() {
     proxy_configuration_ptr proxy_config    = malloc(sizeof(proxy_configuration));
     proxy_config->error_file_path           = "/dev/null";
-    proxy_config->pop3_listen_address       = "0.0.0.0";
-    proxy_config->admin_listen_address      = "127.0.0.1";
+    proxy_config->pop3_listen_address       = NULL;
+    proxy_config->admin_listen_address      = NULL;
     proxy_config->pop3_listen_port          = 1110;
     proxy_config->admin_listen_port         = 9090;
     proxy_config->origin_server_port        = 110;

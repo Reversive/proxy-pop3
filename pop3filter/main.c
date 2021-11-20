@@ -2,7 +2,12 @@
 
 proxy_configuration_ptr proxy_config;
 static bool done = false;
-int server = -1;
+int server_4 = -1;
+int server_6 = -1;
+
+int admin_4 = -1;
+int admin_6 = -1;
+
 
 static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);
@@ -18,71 +23,41 @@ int main(int argc, char *argv[]) {
     fd_selector selector        = NULL;
     fprintf(stdout, "Listening on TCP port %d\n", proxy_config->pop3_listen_port);
 
-    struct addrinfo address_criteria;
-	memset(&address_criteria, 0, sizeof(address_criteria));
-	address_criteria.ai_family = AF_INET6;
-	address_criteria.ai_flags = AI_PASSIVE;
-    address_criteria.ai_socktype = SOCK_STREAM;
-    address_criteria.ai_protocol = IPPROTO_TCP;
-
-	struct addrinfo* server_address;
-    char listen_port[7] = { 0 };
-    if (snprintf(listen_port, sizeof(listen_port), "%hu", proxy_config->pop3_listen_port) < 0) {
-        fprintf(stderr, "Error parseando puerto");
-        goto finally;
+    //IN6ADDR_ANY_INIT
+    if(proxy_config->pop3_listen_address == NULL){
+        server_4 = setup_server_socket("0.0.0.0", proxy_config->pop3_listen_port, IPPROTO_TCP, true);
+        server_6 = setup_server_socket("::", proxy_config->pop3_listen_port, IPPROTO_TCP, false);
+    } else if (is_ipv6(proxy_config->pop3_listen_address)){
+        server_6 = setup_server_socket(proxy_config->pop3_listen_address, proxy_config->pop3_listen_port, IPPROTO_TCP, false);
+    } else {
+        server_4 = setup_server_socket(proxy_config->pop3_listen_address, proxy_config->pop3_listen_port, IPPROTO_TCP, true);
     }
-	int rtnVal = getaddrinfo(NULL, listen_port, &address_criteria, &server_address);
-	if (rtnVal != 0) {
-		log(FATAL, "getaddrinfo() failed %s", gai_strerror(rtnVal));
-		goto finally;
-	}
+
+    if(server_4 == -1 && server_6 == -1)
+        goto finally; //TODO que pasa si tenia que escuchar en las dos si o si?
+    
+    if(proxy_config->admin_listen_address == NULL){
+        admin_4 = setup_server_socket("127.0.0.1", proxy_config->admin_listen_port, IPPROTO_TCP, true); //TODO pasarlos a define
+        admin_6 = setup_server_socket("::1", proxy_config->admin_listen_port, IPPROTO_TCP, false);
+    } else if (is_ipv6(proxy_config->pop3_listen_address)){
+        admin_6 = setup_server_socket(proxy_config->admin_listen_address, proxy_config->admin_listen_port, IPPROTO_UDP, false);
+    } else {
+        admin_4 = setup_server_socket(proxy_config->admin_listen_address, proxy_config->admin_listen_port, IPPROTO_UDP, true);
+    }
+
+    if(admin_4 == -1 && admin_6 == -1)
+        goto finally; //TODO que pasa si tenia que escuchar en las dos si o si?
 
     init_parser_defs();
-
-	for (struct addrinfo* addr = server_address; addr != NULL && server == -1; addr = addr->ai_next) {
-		errno = 0;
-		server = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
-		if (server < 0) {
-			continue; 
-		}
-
-		int no = 0;
-		if (setsockopt(server, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&no, sizeof(no)) < 0) {
-			//log(ERROR, "Set socket options failed");
-			continue;
-		}
-        int yes = 1;
-        if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
-            //log(ERROR, "Set socket options failed");
-            continue;
-        }
-
-		int can_bind = false;
-		if (bind(server, addr->ai_addr, addr->ai_addrlen) == 0) {
-			can_bind = true;
-			if (listen(server, 5) != 0) {//TODO cambiar el maxpending
-				can_bind = false;
-			}
-		}
-		if (!can_bind) {
-			log(DEBUG, "Cant't bind %s", strerror(errno));
-			close(server);
-			server = -1;
-		}
-	}
-	freeaddrinfo(server_address);
-    if(server == -1)
-        goto finally;
-
-    if(listen(server, QUEUE_SIZE) < 0) {
-        error_message = "Unable to listen";
-        goto finally;
-    }
 
     signal(SIGTERM, sigterm_handler);
     signal(SIGINT,  sigterm_handler);
 
-    if(selector_fd_set_nio(server) == -1) {
+    if((server_4 != -1 && selector_fd_set_nio(server_4) == -1) || 
+        (server_6 != -1 && selector_fd_set_nio(server_6) == -1) ||
+        (admin_4 != -1 && selector_fd_set_nio(admin_4) == -1) ||
+        (admin_6 != -1 && selector_fd_set_nio(admin_6) == -1)) {
+            
         error_message = "Failed setting socket as non-blocking";
         goto finally;
     }
@@ -110,11 +85,39 @@ int main(int argc, char *argv[]) {
             .handle_read    = pop3_passive_accept,
     };
 
-    status = selector_register(selector, server, &pop3_handler, OP_READ, NULL);
+    const struct fd_handler admin_handler = {
+            .handle_read    = admin_parse,
+    };
 
-    if(status != SELECTOR_SUCCESS) {
-        error_message = "Failed registering fd";
-        goto finally;
+    if (server_4 != -1) {
+        status = selector_register(selector, server_4, &pop3_handler, OP_READ, NULL);
+        if(status != SELECTOR_SUCCESS) {
+            error_message = "Failed registering server fd";
+            goto finally;
+        }
+    }
+    if (server_6 != -1) {
+        status = selector_register(selector, server_6, &pop3_handler, OP_READ, NULL);
+        if(status != SELECTOR_SUCCESS) {
+            error_message = "Failed registering server fd";
+            goto finally;
+        }
+    }
+    
+    if (admin_4 != -1) {
+        status = selector_register(selector, admin_4, &admin_handler, OP_READ, NULL);
+        if(status != SELECTOR_SUCCESS) {
+            error_message = "Failed registering admin fd";
+            goto finally;
+        }
+    }
+
+    if (admin_6 != -1) {
+        status = selector_register(selector, admin_6, &admin_handler, OP_READ, NULL);
+        if(status != SELECTOR_SUCCESS) {
+            error_message = "Failed registering admin fd";
+            goto finally;
+        }
     }
 
     time_t last_activity = time(NULL);
@@ -152,8 +155,17 @@ finally:
         selector_destroy(selector);
     }
     selector_close();
-    if(server >= 0) {
-        close(server);
+    if(server_4 >= 0) {
+        close(server_4);
+    }
+    if(server_6 >= 0) {
+        close(server_6);
+    }
+    if(admin_4 >= 0) {
+        close(admin_4);
+    }
+    if(admin_6 >= 0) {
+        close(admin_6);
     }
     return ret;
 }

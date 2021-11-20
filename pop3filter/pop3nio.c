@@ -373,16 +373,6 @@ static void reset_parsers(struct pop3* pop3_ptr) {
     }
 }
 
-// TODO estas deberian ir a un IPUTILS.C
-static int is_ipv6(const char* host) {
-    struct sockaddr_in6 sa;
-    return inet_pton(AF_INET6, host, &(sa.sin6_addr));
-}
-
-static int is_ipv4(const char* host) {
-    struct sockaddr_in sa;
-    return inet_pton(AF_INET, host, &(sa.sin_addr));
-}
 
 int is_valid_ip(const char* host) {
     return is_ipv4(host) || is_ipv6(host);
@@ -1346,8 +1336,12 @@ void pop3_passive_accept(struct selector_key* key) {
     }
 
     current_connections++;    
-    if(current_connections == MAX_CONNECTIONS && selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+    if(current_connections == MAX_CONNECTIONS && 
+        ((server_4 != -1 && selector_set_interest(key->s, server_4, OP_NOOP) != SELECTOR_SUCCESS) || 
+        (server_6 != -1 && selector_set_interest(key->s, server_6, OP_NOOP) != SELECTOR_SUCCESS)) ) {
+        
         goto fail;
+    }
 
     return;
 
@@ -1448,7 +1442,9 @@ static void pop3_done(struct selector_key* key) {
 
     current_connections--;
     if(current_connections == MAX_CONNECTIONS - 1) {
-        if (selector_set_interest(key->s, server, OP_READ) != SELECTOR_SUCCESS) {
+        
+        if ((server_4 != -1 && selector_set_interest(key->s, server_4, OP_READ) != SELECTOR_SUCCESS) || 
+            (server_6 != -1 && selector_set_interest(key->s, server_6, OP_READ) != SELECTOR_SUCCESS)) {
             log(FATAL, "%s", "Unable to resuscribe to passive socket");
         }
     }

@@ -94,3 +94,14 @@ sock_blocking_copy(const int source, const int dest) {
 error:
     return ret;
 }
+
+
+int is_ipv6(const char* host) {
+    struct sockaddr_in6 sa;
+    return inet_pton(AF_INET6, host, &(sa.sin6_addr));
+}
+
+int is_ipv4(const char* host) {
+    struct sockaddr_in sa;
+    return inet_pton(AF_INET, host, &(sa.sin_addr));
+}
