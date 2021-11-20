@@ -25,8 +25,8 @@ int main(int argc, char *argv[]) {
 
     //IN6ADDR_ANY_INIT
     if(proxy_config->pop3_listen_address == NULL){
-        server_4 = setup_server_socket("0.0.0.0", proxy_config->pop3_listen_port, IPPROTO_TCP, true);
         server_6 = setup_server_socket("::", proxy_config->pop3_listen_port, IPPROTO_TCP, false);
+        server_4 = setup_server_socket("0.0.0.0", proxy_config->pop3_listen_port, IPPROTO_TCP, true);
     } else if (is_ipv6(proxy_config->pop3_listen_address)){
         server_6 = setup_server_socket(proxy_config->pop3_listen_address, proxy_config->pop3_listen_port, IPPROTO_TCP, false);
     } else {

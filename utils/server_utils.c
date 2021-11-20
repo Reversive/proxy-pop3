@@ -38,19 +38,17 @@ int setup_server_socket(char * listen_addr, int service, unsigned protocol, bool
 	for (struct addrinfo* addr = server_address; addr != NULL && server_sock == -1; addr = addr->ai_next) {
 		errno = 0;
 		server_sock = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
-		if (server_sock < 0) {
+		if (server_sock < 0) 
 			continue; 
-		}
-        
-		int no = 0;
-		if (address_criteria.ai_family == AF_INET6 && setsockopt(server_sock, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&no, sizeof(no)) < 0) {
+
+		int yes = 1;
+		if (!is_ipv4 && setsockopt(server_sock, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&yes, sizeof(yes)) < 0) {
 			log(ERROR, "%s", "Set socket options failed");
             close(server_sock);
             server_sock = -1;
 			continue;
 		}
 
-        int yes = 1;
         if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
             log(ERROR, "%s", "Set socket options failed");
             close(server_sock);
