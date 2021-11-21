@@ -1,16 +1,21 @@
 #ifndef ADMIN_UTILS_H
 #define ADMIN_UTILS_H
 
+#include <stdint.h>
+
 #define ADMIN_VERSION ((uint8_t *) "0.0")
 #define ADMIN_TOKEN ((uint8_t *)"SECRETPROX")
+#define ADMIN_TOKEN_STR "SECRETPROX"
+#define ADMIN_VERSION_STR "0.0"
 
 #define DGRAM_SIZE 512
+#define DATA_SIZE DGRAM_SIZE - 14
 
 typedef struct t_admin_req {
     uint8_t     version[3];
     uint8_t     token[10];
     uint8_t     command;
-    uint8_t     data[DGRAM_SIZE - 14];
+    uint8_t     data[DATA_SIZE];
 } t_admin_req;
 
 typedef struct t_admin_resp {
@@ -26,7 +31,7 @@ enum admin_commands {
     GET_FILTER_CMD,
     SET_FILTER_CMD,
     GET_ERROR_FILE,
-    SET_ERROR_FILE  
+    SET_ERROR_FILE
 };
 
 enum response_stats {
@@ -39,5 +44,6 @@ enum response_stats {
 
 #define LAST_COMMAND SET_ERROR_FILE
 #define COMMAND_SIZE LAST_COMMAND + 1
+#define MAX_COMMAND_LEN 15
 
 #endif
