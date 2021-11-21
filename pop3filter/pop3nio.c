@@ -6,8 +6,6 @@
 #define R 0
 #define W 1
 
-
-
 typedef struct parser* ptr_parser;
 
 struct parser_definition *end_of_line_parser_def;
@@ -255,6 +253,7 @@ struct pop3 {
     int                     current_command;
     bool                    may_multi;
     bool                    has_args;
+    bool                    may_have_args;
     ptr_parser              parsers[COMMANDS];
 
     command_queue           commands_left;
@@ -597,6 +596,7 @@ static void hello_departure(struct selector_key *key) {
     pop3_ptr->response.is_done = false;
     pop3_ptr->checked_user = false;
     pop3_ptr->has_valid_user = false;
+    pop3_ptr->may_have_args = false;
     
     if(proxy_config->pop3_filter_command != NULL) {
         buffer_init(&pop3_ptr->transform.write_buff, BUFFER_SIZE, pop3_ptr->transform_buffer);
@@ -698,6 +698,7 @@ static int request_read(struct selector_key* key) {
             enqueue(pop3_ptr->commands_left, node);
 
             pop3_ptr->has_args = false;
+            pop3_ptr->may_have_args = false;
             last_command_end = i + 1;
 
             reset_parsers(pop3_ptr);
@@ -722,6 +723,8 @@ static int request_read(struct selector_key* key) {
                 }
             }
         } else if(ptr[i] == ' ') {
+            pop3_ptr->may_have_args = true;
+        } else if (pop3_ptr->may_have_args && ptr[i] != '\r') {
             pop3_ptr->has_args = true;
         }
     }
@@ -781,7 +784,7 @@ static int request_write(struct selector_key* key){
         pop3_ptr->response.has_args = node->has_args;
         pop3_ptr->response.current_command = node->command;
         
-        if(node->command == CMD_USER && pop3_ptr->checked_user) { //TODO si me mandan user despues de loguearse, me quedo con el equivocado
+        if(node->command == CMD_USER && pop3_ptr->checked_user) {
             pop3_ptr->checked_user = false;
         }
 
