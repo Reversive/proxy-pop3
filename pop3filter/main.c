@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
     if(proxy_config->admin_listen_address == NULL){
         admin_4 = setup_server_socket("127.0.0.1", proxy_config->admin_listen_port, IPPROTO_UDP, true); //TODO pasarlos a define
         admin_6 = setup_server_socket("::1", proxy_config->admin_listen_port, IPPROTO_UDP, false);
-    } else if (is_ipv6(proxy_config->pop3_listen_address)){
+    } else if (is_ipv6(proxy_config->admin_listen_address)){
         admin_6 = setup_server_socket(proxy_config->admin_listen_address, proxy_config->admin_listen_port, IPPROTO_UDP, false);
     } else {
         admin_4 = setup_server_socket(proxy_config->admin_listen_address, proxy_config->admin_listen_port, IPPROTO_UDP, true);
