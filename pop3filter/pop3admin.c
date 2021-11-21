@@ -23,14 +23,12 @@ static bool cmp_str(uint8_t * str1, uint8_t * str2, uint8_t size) {
 */
 
 void stats_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len) {
-    log(DEBUG, "%s", "In STATS");
     uint8_t resp[DGRAM_SIZE] = {0};
     memcpy(resp, request->version, 3);
     size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, 
         "%chistoric connections: %ld\ncurrent connections: %ld\ntransferred bytes: %ld\r\n",
          OK, historic_connections, current_connections, transferred_bytes);
 
-    log(DEBUG, "snprintf returned %ld", len);
     if (sendto(fd, resp, len + 3, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
 		log(DEBUG, "%s", "Error sending response");
 }
@@ -39,8 +37,7 @@ void get_timeout_handler(int fd, int request_len, struct t_admin_req * request, 
     uint8_t resp[DGRAM_SIZE] = {0};
     memcpy(resp, request->version, 3);
     size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, 
-        "%ctimeout: %f\r\n",
-         OK, client_timeout);
+        "%ctimeout: %f\r\n", OK, client_timeout);
 
     if (sendto(fd, resp, len + 3, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
 		log(DEBUG, "%s", "Error sending response");
