@@ -1,7 +1,7 @@
 #include <pop3nio.h>
 
 #define ATTACHMENT(key) ( (struct pop3 *)(key)->data)
-#define BUFFER_SIZE 40 // TODO cambiar a 1024 
+#define BUFFER_SIZE 1024
 #define COMMANDS 12
 #define R 0
 #define W 1
@@ -340,7 +340,7 @@ void init_parser_defs() {
     memcpy(end_of_multiline_parser_def, &end_of_multiline_parser_aux, sizeof(struct parser_definition));    
 
     pipelining_parser_def = malloc(sizeof(struct parser_definition));
-    struct parser_definition pipelining_parser_aux = parser_utils_strcmpi("PIPELINING");
+    struct parser_definition pipelining_parser_aux = parser_utils_strcmpi("\r\nPIPELINING\r\n");
     memcpy(pipelining_parser_def, &pipelining_parser_aux, sizeof(struct parser_definition));
 
     dot_parser_def = malloc(sizeof(struct parser_definition));
