@@ -18,7 +18,7 @@ void print_client_usage() {
            "\t-h Prints out help and exits. \n"
            "\t-P [ADMIN PORT] Specifies the port where the admin server is located. By default is 9090. \n"
            "\t-t Admin token [REQUIRED] default is empty string \n"
-           "\t-v : Prints out the [NOMBRE] protocol version and exits. \n"
+           "\t-v : Prints out the PMP protocol version and exits. \n"
            "<admin-server>: Address of admin server.\n");
 }
 

@@ -26,7 +26,6 @@ int main(int argc, char *argv[]) {
     const char *error_message   = NULL;
     selector_status status      = SELECTOR_SUCCESS;
     fd_selector selector        = NULL;
-    fprintf(stdout, "Listening on TCP port %d\n", proxy_config->pop3_listen_port);
 
     // //IN6ADDR_ANY_INIT
     if(proxy_config->pop3_listen_address == NULL){
@@ -40,6 +39,8 @@ int main(int argc, char *argv[]) {
 
     if(server_4 == -1 && server_6 == -1)
         goto finally; //TODO que pasa si tenia que escuchar en las dos si o si?
+
+    log(INFO, "Listening on TCP port %d", proxy_config->pop3_listen_port);
     
     if(proxy_config->admin_listen_address == NULL){
         admin_4 = setup_server_socket("127.0.0.1", proxy_config->admin_listen_port, IPPROTO_UDP, true); //TODO pasarlos a define

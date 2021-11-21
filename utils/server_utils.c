@@ -15,7 +15,6 @@ int setup_server_socket(char * listen_addr, int service, unsigned protocol, bool
 	address_criteria.ai_flags = AI_PASSIVE;
 
     if (is_ipv4) {
-        log(DEBUG, "%s", "is ipv4");
         address_criteria.ai_family = AF_INET;
     }
     
@@ -65,13 +64,11 @@ int setup_server_socket(char * listen_addr, int service, unsigned protocol, bool
 		}
 
 		if (!can_bind) {
-			log(DEBUG, "Unable to bind %s", strerror(errno));
+			log(ERROR, "Unable to bind %s", strerror(errno));
 			close(server_sock);
 			server_sock = -1;
 		}
 	}
-
-    log(INFO, "socket %d", server_sock);
     
 	freeaddrinfo(server_address);
 

@@ -1,12 +1,8 @@
 #include <pop3admin.h>
-
-void to_lower_str(char* in_str) {
-	for (int i = 0; in_str[i]; i++) {
-		in_str[i] = tolower(in_str[i]);
-	}
-}
-
 #define MIN_DGRAM_SIZE 14
+
+int filter_cmd_size = 0;
+int error_file_size = 0;
 
 static bool cmp_str(uint8_t * str1, uint8_t * str2, uint8_t size) {
 	for (int i = 0; i < size; i++) {
@@ -26,18 +22,20 @@ static bool cmp_str(uint8_t * str1, uint8_t * str2, uint8_t size) {
     SET_ERROR_FILE  
 */
 
-void stats_handler(int fd, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len) {
+void stats_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len) {
+    log(DEBUG, "%s", "In STATS");
     uint8_t resp[DGRAM_SIZE] = {0};
     memcpy(resp, request->version, 3);
     size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, 
         "%chistoric connections: %ld\ncurrent connections: %ld\ntransferred bytes: %ld\r\n",
          OK, historic_connections, current_connections, transferred_bytes);
 
+    log(DEBUG, "snprintf returned %ld", len);
     if (sendto(fd, resp, len + 3, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
 		log(DEBUG, "%s", "Error sending response");
 }
 
-void get_timeout_handler(int fd, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+void get_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
     uint8_t resp[DGRAM_SIZE] = {0};
     memcpy(resp, request->version, 3);
     size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, 
@@ -48,20 +46,16 @@ void get_timeout_handler(int fd, struct t_admin_req * request, struct sockaddr_i
 		log(DEBUG, "%s", "Error sending response");
 }
 
-void set_timeout_handler(int fd, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+void set_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
     uint8_t resp[DGRAM_SIZE] = {0};
     memcpy(resp, request->version, 3);
-    size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, 
-        "%c\r\n",
-         OK);
+    size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, "%c\r\n", OK);
 
     char tmp[DGRAM_SIZE - 13] = {0};
 
     int i;
-    for (i = 0; i < DGRAM_SIZE - 14 && request->data[i] != '\r'; i++) {
-        log(DEBUG, "%c", request->data[i]);
+    for (i = 0; i < DGRAM_SIZE - 14 && request->data[i] != '\r'; i++)
         tmp[i] = (char) request->data[i];
-    }
 
     tmp[i] = 0;
     client_timeout = atof(tmp);
@@ -70,36 +64,93 @@ void set_timeout_handler(int fd, struct t_admin_req * request, struct sockaddr_i
 		log(DEBUG, "%s", "Error sending response");
 }
 
-void get_filter_handler(int fd, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
-    //uint8_t resp[DGRAM_SIZE - 4] = {0};
-    
-    // t_admin_resp response = {
-    //     .status = OK,
-    //     .data = resp
-    // };
-    return;
+void get_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+    uint8_t resp[DGRAM_SIZE] = {0};
+    memcpy(resp, request->version, 3);
+    size_t len;
+    if (proxy_config->pop3_filter_command != NULL)
+        len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, 
+            "%cfilter command: %s\r\n", OK, proxy_config->pop3_filter_command);
+    else 
+        len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, "%cfilter command: none\r\n", OK);
+
+    if (sendto(fd, resp, len + 3, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
+		log(DEBUG, "%s", "Error sending response");
 }
 
 
-void set_filter_handler(int fd, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
-    return;
+void set_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+    uint8_t resp[DGRAM_SIZE] = {0};
+    memcpy(resp, request->version, 3);
+    if (request_len == 14) { // Missing data
+        size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, "%c\r\n", INVALID_ARGS);
+        if (sendto(fd, resp, len + 3, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
+		    log(DEBUG, "%s", "Error sending response");
+
+        return;
+    }
+
+    size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, "%c\r\n", OK);
+
+    if (filter_cmd_size == 0) {
+        filter_cmd_size = request_len - 13;
+        proxy_config->pop3_filter_command = malloc(request_len - 13);
+    } else if (filter_cmd_size < request_len - 13) {
+        filter_cmd_size = request_len - 13;
+        proxy_config->pop3_filter_command = realloc(proxy_config->pop3_filter_command, request_len - 13);
+    }
+
+    int i;
+    for (i = 0; i < request_len - 14 && request->data[i] != '\r'; i++)
+        proxy_config->pop3_filter_command[i] = (char) request->data[i];
+
+    proxy_config->pop3_filter_command[i] = 0;
+   
+    if (sendto(fd, resp, len + 3, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
+		log(DEBUG, "%s", "Error sending response");
 }
 
-void get_error_handler(int fd, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
-    // uint8_t resp[DGRAM_SIZE - 4] = {0};
-    
-    // t_admin_resp response = {
-    //     .status = OK,
-    //     .data = resp
-    // };
-    return;
+void get_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+    uint8_t resp[DGRAM_SIZE] = {0};
+    memcpy(resp, request->version, 3);
+    size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, 
+        "%cerror file: %s\r\n", OK, proxy_config->error_file_path);
+
+    if (sendto(fd, resp, len + 3, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
+		log(DEBUG, "%s", "Error sending response");
 }
 
-void set_error_handler(int fd, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
-    return;
+void set_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+    uint8_t resp[DGRAM_SIZE] = {0};
+    memcpy(resp, request->version, 3);
+    if (request_len == 14) { // Missing data
+        size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, "%c\r\n", INVALID_ARGS);
+        if (sendto(fd, resp, len + 3, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
+		    log(DEBUG, "%s", "Error sending response");
+
+        return;
+    }
+
+    size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, "%c\r\n", OK);
+    if (filter_cmd_size == 0) {
+        filter_cmd_size = request_len - 13;
+        proxy_config->error_file_path = malloc(request_len - 13);
+    } else if (filter_cmd_size < request_len - 13) {
+        filter_cmd_size = request_len - 13;
+        proxy_config->error_file_path = realloc(proxy_config->error_file_path, request_len - 13);
+    }
+
+    int i;
+    for (i = 0; i < request_len - 14 && request->data[i] != '\r'; i++)
+        proxy_config->error_file_path[i] = (char) request->data[i];
+
+    proxy_config->error_file_path[i] = 0;
+
+    if (sendto(fd, resp, len + 3, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
+		log(DEBUG, "%s", "Error sending response");
 }
 
-void(* admin_actions[COMMAND_SIZE])(int, struct t_admin_req *, struct sockaddr_in6, size_t) = {stats_handler, get_timeout_handler, 
+void(* admin_actions[COMMAND_SIZE])(int, int, struct t_admin_req *, struct sockaddr_in6, size_t) = {stats_handler, get_timeout_handler, 
                         set_timeout_handler, get_filter_handler, set_filter_handler, get_error_handler, set_error_handler};
 
 void admin_parse(struct selector_key* key) {
@@ -123,9 +174,6 @@ void admin_parse(struct selector_key* key) {
     }
 
     t_admin_req * request = (t_admin_req *) buffer;
-    set_timeout_handler(key->fd, request, client_address, len);
-    return;
-
     if (!cmp_str(ADMIN_VERSION, request->version, 3)) {
         if (sendto(key->fd, "VERS!\r\n", 7, 0, (const struct sockaddr *) &client_address, len) < 0)
 		    log(DEBUG, "%s", "Error sending response");
@@ -147,19 +195,7 @@ void admin_parse(struct selector_key* key) {
         return;
     }
 
-    admin_actions[request->command](key->fd, request, client_address, len);
-    
-	// if (buffer[read_chars - 1] == '\n') // Por si lo estan probando con netcat, en modo interactivo
-	// 	read_chars--;
+    log(DEBUG, "command %d", request->command);
 
-	// buffer[read_chars] = 0;
-	//log(DEBUG, "UDP received: %s", buffer);
-	//to_lower_str(buffer);
-
-    //char buffer_out[DGRAM_SIZE] = { 0 };
-	// sprintf(buffer_out, "Connections: %d\r\nIncorrect lines: %d\r\nCorrect lines: %d\r\nInvalid datagrams: %d\r\n", 
-    //     total_connections, invalid_lines, total_lines - invalid_lines, invalid_datagrams);
-
-    // if (sendto(key->fd, "PERF!\r\n", 7, 0, (const struct sockaddr *) &client_address, len) < 0)
-	// 	log(DEBUG, "%s", "Error sending response");
+    admin_actions[request->command](key->fd, read_chars, request, client_address, len);
 }

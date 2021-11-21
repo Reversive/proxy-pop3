@@ -1,11 +1,24 @@
 #include <pop3ctl.h>
 
+typedef struct t_admin_command {
+    char def[MAX_COMMAND_LEN];
+    char help_str[40];
+} t_admin_command;
 
-char* commands[] = { "STATS","GET_TIMEOUT","SET_TIMEOUT","GET_FILTER_CMD","SET_FILTER_CMD","GET_ERROR_FILE","SET_ERROR_FILE" };
+t_admin_command commands[] = { 
+    {"STATS", "get pop3filer stats"},
+    {"GET_TIMEOUT", "get pop3filer timeout"},
+    {"SET_TIMEOUT", "set pop3filer timeout"},
+    {"GET_FILTER_CMD", "get pop3filer filter command"},
+    {"SET_FILTER_CMD", "set pop3filer filter command"},
+    {"GET_ERROR_FILE", "get pop3filer error file"},
+    {"SET_ERROR_FILE", "set pop3filer error file"} 
+};
 
 client_config_ptr client_config;
 
 static int get_command_number(const char* cmd);
+static void print_help();
 
 int main(int argc, char* argv[]) {
     client_config = parse_client_options(argc, argv);
@@ -46,7 +59,6 @@ int main(int argc, char* argv[]) {
     size_t stdin_len = 0;
 
     while (1) {
-
         if ((read_chars_in = getline(&stdin_buffer, &stdin_len, stdin)) < 0) {
             perror("Error reading from stdin");
         }
@@ -59,26 +71,29 @@ int main(int argc, char* argv[]) {
         }
 
         command[i-1] = 0;
+        if (strcmp("HELP", command) == 0){
+            print_help();
+            continue;
+        }
         curr_command = get_command_number(command);
 
         if (curr_command == -1) {
-            perror("Comando invalido");
+            printf("Comando invalido\n");
             req_buff[13]=0;
             continue;
         }
 
-        req_buff[13] = curr_command + '0';
+        req_buff[13] = (char) curr_command;
         if (i++ < read_chars_in) {
             for (j = 14; i < read_chars_in; i++, j++)
                 req_buff[j] = stdin_buffer[i];
             data[j] = 0;
             strcat(req_buff, data);
-        }
-        else {
+        } else {
             req_buff[14] = 0;
         }
 
-        sendto(sockfd, (const char*)req_buff, strlen(req_buff), MSG_CONFIRM, (const struct sockaddr*)&servaddr, sizeof(servaddr));
+        sendto(sockfd, (const char*) req_buff, 14 + i - read_chars_in, MSG_CONFIRM, (const struct sockaddr*)&servaddr, sizeof(servaddr));
 
         printf("%s\n", req_buff);
         req_buff[13] = 0;
@@ -86,7 +101,8 @@ int main(int argc, char* argv[]) {
         n = recvfrom(sockfd, (char*)buffer, MAX_LINE, MSG_WAITALL, (struct sockaddr*)&servaddr, &len);
 
         buffer[n] = '\0';
-        printf("Server : %s\n", buffer);
+        t_admin_resp * resp = (t_admin_resp *) buffer;
+        printf("response size %ld, Server : %s\n", n, resp->data);
     }
     free(req_buff);
     return 0;
@@ -94,9 +110,17 @@ int main(int argc, char* argv[]) {
 
 static int get_command_number(const char* cmd) {
     for (int i = 0; i < COMMAND_SIZE; i++) {
-        if (strcmp(cmd, commands[i]) == 0) {
+        if (strcmp(cmd, commands[i].def) == 0) {
             return i;
         }
     }
     return -1;
+}
+
+static void print_help(){
+    printf("Proxy Management Protocol valid commands:\n");
+    for (int i = 0; i<COMMAND_SIZE; i++){
+        printf("%s ", commands[i].def);
+        printf("%s\n", commands[i].help_str);
+    }
 }
