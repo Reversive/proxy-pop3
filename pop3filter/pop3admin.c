@@ -196,3 +196,13 @@ void admin_parse(struct selector_key* key) {
 
     admin_actions[request->command](key->fd, read_chars, request, client_address, len);
 }
+
+
+
+void admin_destroy() {
+    if (filter_cmd_size > 0)
+        free(proxy_config->pop3_filter_command);
+
+    if (error_file_size > 0)
+        free(proxy_config->error_file_path);
+}

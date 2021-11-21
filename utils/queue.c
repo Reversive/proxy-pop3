@@ -40,11 +40,17 @@ void free_node(command_node node){
     free(node);
 }
 
-void destroy(command_queue queue){
+void queue_destroy(command_queue queue){
     free_node(queue->first);
     free(queue);
 }
 
 command_node peek(command_queue queue) {
     return queue->first;
+}
+
+void reset_queue(command_queue queue){
+    while (!is_empty(queue)) {
+        free(dequeue(queue));
+    }
 }

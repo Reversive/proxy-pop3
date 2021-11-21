@@ -5,6 +5,7 @@
 #define COMMANDS 12
 #define R 0
 #define W 1
+#define END_STRING ".\r\n"
 
 typedef struct parser* ptr_parser;
 
@@ -23,7 +24,6 @@ static void             update_last_activity(struct selector_key* key);
 static struct pop3*     pop3_new(int client_fd);
 static void             pop3_destroy_(struct pop3* s);
 static void             pop3_destroy(struct pop3* s);
-void                    pop3_pool_destroy(void);
 static int              write_error_message(struct selector_key *key);
 static int              resolve_origin(struct selector_key* key);
 static int              done_resolving_origin(struct selector_key* key);
@@ -349,16 +349,25 @@ void init_parser_defs() {
 }
 
 void destroy_parser_defs() {
-    for (int i = 0; i < COMMANDS; i++) 
+    for (int i = 0; i < COMMANDS; i++) {
+        parser_utils_strcmpi_destroy(defs[i]);
         free(defs[i]);
+    }
+
+    parser_utils_strcmpi_destroy(end_of_line_parser_def);
+    parser_utils_strcmpi_destroy(end_of_multiline_parser_def);
+    parser_utils_strcmpi_destroy(pipelining_parser_def);
+    parser_utils_strcmpi_destroy(dot_parser_def);
         
     free(end_of_line_parser_def);
     free(end_of_multiline_parser_def);
     free(pipelining_parser_def);
+    free(dot_parser_def);
 }
 
 void init_parsers(struct pop3* pop3_ptr) {
-    pop3_ptr->capa.end_of_multiline_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
+    //pop3_ptr->capa.end_of_multiline_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
+    log(DEBUG, "%s", "Initializing parsers");
     pop3_ptr->hello_state.hello_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
     pop3_ptr->request.end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
 
@@ -445,6 +454,8 @@ static int connect_to_origin_by_ip(struct selector_key *key, int family, void *s
                 goto ip_connect_fail;
             }
 
+            pop3_ptr->references++;
+
             log(INFO, "Client %s connected to origin %s", 
                 sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address),
                 sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) sock_addr));
@@ -463,11 +474,6 @@ ip_connect_fail:
 }
 
 static int resolve_origin(struct selector_key* key) {
-    pthread_t tid;
-    struct selector_key* k = malloc(sizeof(*key));
-    if (k == NULL)
-        return FAILURE;
-
     if(is_ipv4(proxy_config->origin_server_address)) {
         struct sockaddr_in servaddr;
         servaddr.sin_family = AF_INET;
@@ -482,6 +488,11 @@ static int resolve_origin(struct selector_key* key) {
         return connect_to_origin_by_ip(key, AF_INET6, (void*)&servaddr, sizeof(servaddr));
     }
 
+    pthread_t tid;
+    struct selector_key* k = malloc(sizeof(*key));
+    if (k == NULL)
+        return FAILURE;
+        
     memcpy(k, key, sizeof(*k));
     if (pthread_create(&tid, 0, blocking_resolve_origin, k) == -1 
         || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS){
@@ -506,6 +517,7 @@ static int connect_to_origin(struct selector_key* key) {
                 if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || selector_register(key->s, sock, &pop3_handler, OP_WRITE, key->data) != SELECTOR_SUCCESS) {
                     goto connect_fail;
                 }
+                pop3_ptr->references++;
             } else {
                 goto connect_fail;
             }
@@ -586,7 +598,7 @@ static int connection(struct selector_key* key) {
 
 static void hello_departure(struct selector_key *key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
-    pop3_ptr->commands_left = new_command_queue();
+    //pop3_ptr->commands_left = new_command_queue();
     pop3_ptr->current_command = -1;
     for (int i = 0; i < COMMANDS; i++)
          pop3_ptr->request.parser_states[i] = 1;
@@ -597,7 +609,9 @@ static void hello_departure(struct selector_key *key) {
     pop3_ptr->checked_user = false;
     pop3_ptr->has_valid_user = false;
     pop3_ptr->may_have_args = false;
-    
+
+    //parser_destroy(pop3_ptr->hello_state.hello_parser);
+
     if(proxy_config->pop3_filter_command != NULL) {
         buffer_init(&pop3_ptr->transform.write_buff, BUFFER_SIZE, pop3_ptr->transform_buffer);
     }
@@ -772,6 +786,7 @@ static int request_write(struct selector_key* key){
         
         return FAILURE_WITH_MESSAGE;
     }
+    
     buffer_read_adv(&pop3_ptr->client_to_origin, sent_bytes);
 
     transferred_bytes += sent_bytes;
@@ -847,7 +862,7 @@ static int response_read(struct selector_key* key) {
             pop3_ptr->response.end_string_len = 0;
             pop3_ptr->response.end_string = NULL;
 
-            parser_reset(pop3_ptr->response.end_of_line_parser);
+            parser_destroy(pop3_ptr->response.end_of_line_parser);
             pop3_ptr->response.end_of_line_parser = NULL;
             break;
         } else if(end_state->type == STRING_CMP_NEQ) {
@@ -980,7 +995,7 @@ static int capa_read(struct selector_key* key) {
                 pop3_ptr->response.end_string = "PIPELINING\r\n.\r\n";
                 pop3_ptr->response.end_string_len = 13;
             } else{
-                pop3_ptr->response.end_string = ".\r\n";
+                pop3_ptr->response.end_string = END_STRING;
                 pop3_ptr->response.end_string_len = 3;
             }
 
@@ -990,6 +1005,7 @@ static int capa_read(struct selector_key* key) {
             
             pop3_ptr->response.is_done = true;
             pop3_ptr->capa.has_started = false;
+            parser_destroy(pop3_ptr->capa.end_of_multiline_parser);
             buffer_write_adv(&pop3_ptr->origin_to_client, dot_idx);
             return RESPONSE;
         } else if(end_state->type == STRING_CMP_NEQ) {
@@ -1101,6 +1117,8 @@ static int transform_init(struct selector_key* key) {
         return TRANSFORM_FAILURE;
     }
 
+    pop3_ptr->references++;
+    
     if (selector_register(key->s, out[R], &pop3_handler, OP_NOOP, key->data) != SELECTOR_SUCCESS) {
         selector_unregister_fd(key->s, in[W]);
         close(in[W]);
@@ -1108,6 +1126,8 @@ static int transform_init(struct selector_key* key) {
         pop3_ptr->transform.write_fd = pop3_ptr->client_fd;
         return TRANSFORM_FAILURE;
     }
+    
+    pop3_ptr->references++;
 
     return TRANSFORM;
 }
@@ -1138,6 +1158,7 @@ static int transform_write(struct selector_key * key) {
             }
         }
 
+        parser_destroy(end_of_line_parser);
         buffer_read_adv(&pop3_ptr->origin_to_client, i);
         if (!pop3_ptr->transform.skipped_line || !buffer_can_read(&pop3_ptr->origin_to_client)) {
             if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS 
@@ -1160,7 +1181,7 @@ static int transform_write(struct selector_key * key) {
         for (size_t i = 0; i < max_size; i++) {
             const struct parser_event* end_state = parser_feed(pop3_ptr->transform.end_parser, ptr[i]);
             if(end_state->type == STRING_CMP_EQ) {
-                parser_reset(pop3_ptr->transform.end_parser);
+                parser_destroy(pop3_ptr->transform.end_parser);
                 pop3_ptr->transform.found_end = true;
                 break;
             } else if(end_state->type == STRING_CMP_NEQ) {
@@ -1187,7 +1208,6 @@ static int transform_write(struct selector_key * key) {
                 write_ptr[write_index++] = ptr[i];
             }
         }
-
         buffer_read_adv(&pop3_ptr->origin_to_client, max_size);
         buffer_write_adv(&pop3_ptr->transform.write_buff, write_index);
     }
@@ -1231,7 +1251,7 @@ static int transform_read(struct selector_key * key) {
         memcpy(ptr, response, strlen(response));
         buffer_write_adv(&pop3_ptr->origin_to_client, strlen(response));
         pop3_ptr->transform.started_reading = true;
-        pop3_ptr->transform.dot_parser = parser_init(parser_no_classes(), dot_parser_def);
+        parser_reset(pop3_ptr->transform.dot_parser);
         buffer_compact(&pop3_ptr->transform.write_buff); //TODO, no hace falta en realidad, pensar los casos
     }
 
@@ -1285,7 +1305,8 @@ static int transform_read(struct selector_key * key) {
             
         return RESPONSE;
     }
-
+    
+    parser_destroy(pop3_ptr->transform.dot_parser);
     close(pop3_ptr->transform.read_fd);
     buffer_read_adv(&pop3_ptr->transform.write_buff, read_size);
 
@@ -1295,7 +1316,7 @@ static int transform_read(struct selector_key * key) {
         selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
         return FAILURE;
         
-    pop3_ptr->response.end_string = ".\r\n"; // TODO pasarlo a #DEFINE
+    pop3_ptr->response.end_string = END_STRING; // TODO pasarlo a #DEFINE --> Habia un ".\r\n"
     pop3_ptr->response.end_string_len = 3;
 
     return RESPONSE;
@@ -1340,6 +1361,9 @@ void pop3_passive_accept(struct selector_key* key) {
         goto fail;
     }
 
+    //state->references++;
+
+
     current_connections++;    
     if(current_connections == MAX_CONNECTIONS && 
         ((server_4 != -1 && selector_set_interest(key->s, server_4, OP_NOOP) != SELECTOR_SUCCESS) || 
@@ -1361,16 +1385,18 @@ static struct pop3* pop3_new(int client_fd) {
     struct pop3* pop3_ptr;
     if (pool == NULL) {
         pop3_ptr = malloc(sizeof(*pop3_ptr));
-    }
-    else {
+        init_parsers(pop3_ptr);
+        pop3_ptr->commands_left = new_command_queue();
+    } else {
         pop3_ptr = pool;
         pool = pool->next;
         pop3_ptr->next = 0;
     }
 
-    memset(pop3_ptr, 0x00, sizeof(*pop3_ptr));
+    //memset(pop3_ptr, 0x00, sizeof(*pop3_ptr));
     pop3_ptr->origin_fd = -1;
     pop3_ptr->client_fd = client_fd;
+    pop3_ptr->unmatched_len = 0;
     pop3_ptr->client_address_len = sizeof(client_fd);
     pop3_ptr->stm.initial = RESOLVE_ORIGIN;
     pop3_ptr->stm.max_state = FAILURE;
@@ -1383,7 +1409,7 @@ static struct pop3* pop3_new(int client_fd) {
     buffer_init(&pop3_ptr->origin_to_client, BUFFER_SIZE, pop3_ptr->write_buffer);
     pop3_ptr->references = 1;
 
-    init_parsers(pop3_ptr);
+    // init_parsers(pop3_ptr);
     return pop3_ptr;
 }
 
@@ -1435,7 +1461,7 @@ static void pop3_block(struct selector_key* key) {
 }
 
 static void pop3_close(struct selector_key* key) {
-    return;
+    pop3_destroy(ATTACHMENT(key));
 }
 
 static void pop3_done(struct selector_key* key) {
@@ -1447,16 +1473,12 @@ static void pop3_done(struct selector_key* key) {
 
     current_connections--;
     if(current_connections == MAX_CONNECTIONS - 1) {
-        
         if ((server_4 != -1 && selector_set_interest(key->s, server_4, OP_READ) != SELECTOR_SUCCESS) || 
             (server_6 != -1 && selector_set_interest(key->s, server_6, OP_READ) != SELECTOR_SUCCESS)) {
             log(FATAL, "%s", "Unable to resuscribe to passive socket");
         }
     }
-    // TODO a lot of frees
-    
-    parser_destroy(pop3_ptr->capa.end_of_multiline_parser);
-    pop3_ptr->capa.end_of_multiline_parser = NULL;
+
     for (unsigned i = 0; i < N(fds); i++) {
         if (fds[i] != -1) {
             if (selector_unregister_fd(key->s, fds[i]) != SELECTOR_SUCCESS) {
@@ -1465,33 +1487,53 @@ static void pop3_done(struct selector_key* key) {
             close(fds[i]);
         }
     }
+
+    reset_parsers(pop3_ptr);
+    // TODO reset queue
+    reset_queue(pop3_ptr->commands_left);
+
+
+
+    // parser_destroy(pop3_ptr->request.end_of_line_parser);
+    // parser_destroy(pop3_ptr->capa.end_of_multiline_parser);
+    // if (proxy_config->pop3_filter_command != NULL) {
+    //     parser_destroy(pop3_ptr->transform.dot_parser);
+    //     parser_destroy(pop3_ptr->transform.end_parser);
+    // }
+
+    // queue_destroy(pop3_ptr->commands_left);
     pop3_destroy(pop3_ptr);
 }
 
 static void pop3_destroy_(struct pop3* s) {
-    if (s->origin_resolution != NULL) {
-        freeaddrinfo(s->origin_resolution);
-        s->origin_resolution = 0;
-    }
+    log(DEBUG, "%s", "Freeing pop3 client"); 
+
+    for (int i = 0; i < COMMANDS; i++)
+        parser_destroy(s->parsers[i]);
+
+    parser_destroy(s->hello_state.hello_parser);
+    parser_destroy(s->request.end_of_line_parser);
+    parser_destroy(s->capa.end_of_multiline_parser);
+    // if (proxy_config->pop3_filter_command != NULL) {
+    //     parser_destroy(s->transform.dot_parser);
+    //     parser_destroy(s->transform.end_parser);
+    // }
+
+    queue_destroy(s->commands_left);
     free(s);
 }
 
 static void pop3_destroy(struct pop3* s) {
     if (s == NULL) {
-    }
-    else if (s->references == 1) {
-        if (s != NULL) {
-            if (pool_size < max_pool) {
-                s->next = pool;
-                pool = s;
-                pool_size++;
-            }
-            else {
-                pop3_destroy_(s);
-            }
+    } else if (s->references == 1) {
+        if (pool_size < max_pool) {
+            s->next = pool;
+            pool = s;
+            pool_size++;
+        } else {
+            pop3_destroy_(s);
         }
-    }
-    else {
+    } else {
         s->references -= 1;
     }
 }

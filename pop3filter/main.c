@@ -13,6 +13,7 @@ float client_timeout = 120.0;
 static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);
     done = true;
+
 }
 
 int main(int argc, char *argv[]) {
@@ -157,6 +158,7 @@ finally:
         ret = 1;
     }
     destroy_parser_defs();
+    //pop3_pool_destroy();
     if(selector != NULL) {
         selector_destroy(selector);
     }

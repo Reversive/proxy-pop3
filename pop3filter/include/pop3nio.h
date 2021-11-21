@@ -34,6 +34,9 @@ void init_parser_defs();
 
 void destroy_parser_defs();
 
+void pop3_pool_destroy(void);
+
+
 extern int server_4;
 extern int server_6;
 #endif //POP3FILTER_POP3NIO_H

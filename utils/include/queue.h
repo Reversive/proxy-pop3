@@ -32,5 +32,8 @@ bool is_empty(command_queue queue);
 
 void free_node(command_node node);
 
-void destroy(command_queue queue);
+void queue_destroy(command_queue queue);
+
+void reset_queue(command_queue queue);
+
 

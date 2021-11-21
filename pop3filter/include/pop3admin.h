@@ -13,6 +13,7 @@
 #define BUFFSIZE 1024
 
 void admin_parse(struct selector_key* key);
+void admin_destroy();
 
 extern size_t historic_connections;
 extern size_t current_connections;
