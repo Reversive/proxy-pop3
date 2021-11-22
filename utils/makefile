@@ -5,10 +5,10 @@ OBJECTS := $(SOURCES:.c=.o)
 rm       = rm -rf
 
 all:$(SOURCES)
-	$(GCC) $(CFLAGS) -I./include $(SOURCES)
+	$(CC) $(CFLAGS) -I./include $(SOURCES)
 
 %.o : %.c
-	$(GCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
 	@$(rm) $(OBJECTS)

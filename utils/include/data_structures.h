@@ -18,4 +18,5 @@ typedef int fd;
 typedef proxy_configuration * proxy_configuration_ptr;
 
 extern proxy_configuration_ptr proxy_config;
+
 #endif

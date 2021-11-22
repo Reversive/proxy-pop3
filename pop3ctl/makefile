@@ -8,19 +8,19 @@ rm      = rm -rf
 all: utils compile link
 
 compile:$(SOURCES)
-	$(GCC) $(CFLAGS) -I./include -I../utils/include $(SOURCES)
+	$(CC) $(CFLAGS) -I./include -I../utils/include $(SOURCES)
 
 link:$(OBJECTS)
-	$(LINKER) $(LFLAGS) $(OBJECTS) ../utils/*.o -o $(BINARY).out
+	$(CC) $(LFLAGS) $(OBJECTS) ../utils/*.o -o $(BINARY).out
 
 utils:
 	cd ../utils; make all
 
 %.o: %.c
-	$(GCC) $(GCCFLAGS) -I./include -I../utils/include -c $< -o $@
+	$(CC) $(GCCFLAGS) -I./include -I../utils/include -c $< -o $@
 
 %.out : %.o
-	$(LINKER) $(LFLAGS) $< -o $@
+	$(CC) $(LFLAGS) $< -o $@
 
 clean:
 	cd ../utils; make clean

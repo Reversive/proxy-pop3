@@ -18,6 +18,8 @@ static void sigterm_handler(const int signal) {
 }
 
 int main(int argc, char *argv[]) {
+    int ret = 0;
+
     proxy_config = parse_options(argc, argv);
     close(STDIN);
     
@@ -122,12 +124,6 @@ int main(int argc, char *argv[]) {
             goto finally;
         }
     }
-
-    // if (signal(SIGCHLD, NULL) == -1) {
-    //     error_message = "Failed to execute sigignore";
-    //     goto finally;
-    // }
-
     
     struct sigaction sa;
     sa.sa_handler = SIG_DFL; //handle signal by ignoring
@@ -159,7 +155,6 @@ int main(int argc, char *argv[]) {
         error_message = "Closing...";
     }
 
-    int ret = 0;
 
 finally:
     if(status != SELECTOR_SUCCESS) {
