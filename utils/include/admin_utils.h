@@ -37,6 +37,7 @@ enum admin_commands {
 enum response_stats {
     OK = 0,
     UNSOPPORTED_COMMAND,
+    UNSUPPORTED_VERSION,
     INVALID_ARGS,
     UNAUTHORIZED,
     INTERNAL_ERROR

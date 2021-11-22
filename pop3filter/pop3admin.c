@@ -129,11 +129,11 @@ void set_error_handler(int fd, int request_len, struct t_admin_req * request, st
     }
 
     size_t len = snprintf((char *) resp + 3, DGRAM_SIZE - 3, "%c\r\n", OK);
-    if (filter_cmd_size == 0) {
-        filter_cmd_size = request_len - 13;
+    if (error_file_size == 0) {
+        error_file_size = request_len - 13;
         proxy_config->error_file_path = malloc(request_len - 13);
-    } else if (filter_cmd_size < request_len - 13) {
-        filter_cmd_size = request_len - 13;
+    } else if (error_file_size < request_len - 13) {
+        error_file_size = request_len - 13;
         proxy_config->error_file_path = realloc(proxy_config->error_file_path, request_len - 13);
     }
 
@@ -150,6 +150,14 @@ void set_error_handler(int fd, int request_len, struct t_admin_req * request, st
 void(* admin_actions[COMMAND_SIZE])(int, int, struct t_admin_req *, struct sockaddr_in6, size_t) = {stats_handler, get_timeout_handler, 
                         set_timeout_handler, get_filter_handler, set_filter_handler, get_error_handler, set_error_handler};
 
+
+static void send_admin_error(int fd, int status, char * message, struct sockaddr_in6 client_addr, size_t client_addr_len) {
+    char resp[DGRAM_SIZE];
+    ssize_t len = snprintf(resp, DGRAM_SIZE, "%s%c%s\r\n", ADMIN_VERSION_STR, status, message);
+    if (sendto(fd, resp, len, 0, (const struct sockaddr *) &client_addr, client_addr_len) < 0)
+		log(ERROR, "%s", "Error sending response");
+}
+
 void admin_parse(struct selector_key* key) {
     log(DEBUG, "%s", "Incoming admin datagram");
     uint8_t buffer[DGRAM_SIZE];
@@ -164,36 +172,27 @@ void admin_parse(struct selector_key* key) {
     }
 
     if(read_chars < MIN_DGRAM_SIZE) {
-        if (sendto(key->fd, "HOLA!\r\n", 7, 0, (const struct sockaddr *) &client_address, len) < 0)
-		    log(DEBUG, "%s", "Error sending response");
-
+        send_admin_error(key->fd, INVALID_ARGS, "Datagram length", client_address, len);
         return;
     }
 
     t_admin_req * request = (t_admin_req *) buffer;
     if (!cmp_str(ADMIN_VERSION, request->version, 3)) {
-        if (sendto(key->fd, "VERS!\r\n", 7, 0, (const struct sockaddr *) &client_address, len) < 0)
-		    log(DEBUG, "%s", "Error sending response");
-
+        send_admin_error(key->fd, UNSUPPORTED_VERSION, "Invalid version number", client_address, len);
         return;
     }
 
     if (request->command >= COMMAND_SIZE) {
-        if (sendto(key->fd, "COMM!\r\n", 7, 0, (const struct sockaddr *) &client_address, len) < 0)
-		    log(DEBUG, "%s", "Error sending response");
-
+        send_admin_error(key->fd, UNSOPPORTED_COMMAND, "Unsopported command", client_address, len);
         return;
     }
 
     if (!cmp_str(ADMIN_TOKEN, request->token, 10)) {
-        if (sendto(key->fd, "TOKE!\r\n", 7, 0, (const struct sockaddr *) &client_address, len) < 0)
-		    log(DEBUG, "%s", "Error sending response");
-
+        send_admin_error(key->fd, UNAUTHORIZED, "Unauthorized", client_address, len);
         return;
     }
 
     log(DEBUG, "command %d", request->command);
-
     admin_actions[request->command](key->fd, read_chars, request, client_address, len);
 }
 
