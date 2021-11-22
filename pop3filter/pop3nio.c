@@ -1006,6 +1006,7 @@ static int capa_read(struct selector_key* key) {
             pop3_ptr->response.is_done = true;
             pop3_ptr->capa.has_started = false;
             parser_destroy(pop3_ptr->capa.end_of_multiline_parser);
+            pop3_ptr->capa.end_of_multiline_parser = NULL;
             buffer_write_adv(&pop3_ptr->origin_to_client, dot_idx);
             return RESPONSE;
         } else if(end_state->type == STRING_CMP_NEQ) {
@@ -1520,6 +1521,30 @@ static void pop3_destroy_(struct pop3* s) {
     //     parser_destroy(s->transform.dot_parser);
     //     parser_destroy(s->transform.end_parser);
     // }
+    if (s->transform.dot_parser != NULL) {
+        parser_destroy(s->transform.dot_parser);
+        s->transform.dot_parser = NULL;
+    }
+
+    if (s->transform.end_parser != NULL) {
+        parser_destroy(s->transform.end_parser);
+        s->transform.end_parser = NULL;
+    }
+
+    if (s->response.end_of_line_parser != NULL) {
+        parser_destroy(s->response.end_of_line_parser);
+        s->response.end_of_line_parser = NULL;
+    }
+
+    if (s->capa.end_of_multiline_parser != NULL) {
+        parser_destroy(s->capa.end_of_multiline_parser);
+        s->capa.end_of_multiline_parser = NULL;
+    }
+
+    if (s->capa.pipelining_parser != NULL) {
+        parser_destroy(s->capa.pipelining_parser);
+        s->capa.pipelining_parser = NULL;
+    }
 
     queue_destroy(s->commands_left);
     free(s);
