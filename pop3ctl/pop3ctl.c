@@ -24,7 +24,11 @@ int main(int argc, char* argv[]) {
     client_config = parse_client_options(argc, argv);
 
     if(client_config->admin_token == NULL){
-        printf("Token is mandatory\n");
+        printf("Token is mandatory. Try using -t token\n");
+        return -1;
+    }
+    if(strlen(client_config->admin_token)>10){
+        printf("Token must have 10 or less characters\n");
         return -1;
     }
     printf("Client connect to %s:%d using token %s\n",
@@ -34,15 +38,11 @@ int main(int argc, char* argv[]) {
     char buffer[MAX_LINE];
     struct sockaddr_in     servaddr;
 
-    printf("Trying to create socket\n");
-
     // Creating socket file descriptor
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         perror("socket creation failed\n");
         exit(EXIT_FAILURE);
     }
-
-    printf("socket %d\n", sockfd);
 
     memset(&servaddr, 0, sizeof(servaddr));
     // Filling server information
@@ -75,7 +75,6 @@ int main(int argc, char* argv[]) {
             command[i] = toupper(stdin_buffer[i]);
         }
 
-        //[S,T,A,T,S,0]
         command[i-1] = 0;
         if (strcmp("HELP", command) == 0){
             print_help();
@@ -97,7 +96,6 @@ int main(int argc, char* argv[]) {
         sendto(sockfd, (const char*) req_buff, j, MSG_CONFIRM, (const struct sockaddr*)&servaddr, sizeof(servaddr));
 
         printf("%s\n", req_buff);
-        //req_buff[13] = 0;
 
         n = recvfrom(sockfd, (char*)buffer, MAX_LINE, MSG_WAITALL, (struct sockaddr*)&servaddr, &len);
 
@@ -120,7 +118,7 @@ static int get_command_number(const char* cmd) {
 static void print_help(){
     printf("Proxy Management Protocol valid commands:\n");
     for (int i = 0; i<COMMAND_SIZE; i++){
-        printf("%s ", commands[i].def);
+        printf("- %s ", commands[i].def);
         printf("%s\n", commands[i].help_str);
     }
 }

@@ -456,6 +456,8 @@ static int connect_to_origin_by_ip(struct selector_key *key, int family, void *s
                 goto ip_connect_fail;
             }
 
+            pop3_ptr->references++;
+
             return CONNECT;
         } else if(ret == 0) {
             pop3_ptr->origin_fd = sock;
@@ -711,7 +713,7 @@ static int request_read(struct selector_key* key) {
         const struct parser_event* end_of_line_state = parser_feed(pop3_ptr->request.end_of_line_parser, ptr[i]);
         
         if (end_of_line_state->type == STRING_CMP_EQ) {
-            command_node node = malloc(sizeof(t_node));
+            command_node node = calloc(1, sizeof(t_node));
 
             node->command = pop3_ptr->current_command;
             node->command_len = i + 1 - last_command_end + pop3_ptr->unmatched_len;
@@ -1406,7 +1408,8 @@ fail:
     if (client != -1) {
         close(client);
     }
-    pop3_destroy(state);
+    log(DEBUG, "%s", "Fail");
+    //pop3_destroy(state);
 }
 
 static struct pop3* pop3_new(int client_fd) {
@@ -1562,7 +1565,6 @@ static void pop3_destroy_(struct pop3* s) {
 }
 
 static void pop3_destroy(struct pop3* s) {
-    log(DEBUG, "Calling destroy with value %d", s->references);
     if (s == NULL) {
     } else if (s->references == 1) {
         if (pool_size < max_pool) {

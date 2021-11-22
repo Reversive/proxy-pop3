@@ -121,7 +121,18 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (sigignore(SIGCHLD) == -1) {
+    // if (signal(SIGCHLD, NULL) == -1) {
+    //     error_message = "Failed to execute sigignore";
+    //     goto finally;
+    // }
+
+    
+    struct sigaction sa;
+    sa.sa_handler = SIG_DFL; //handle signal by ignoring
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_NOCLDWAIT;
+    if (sigaction(SIGCHLD, &sa, 0) == -1) {
+        perror(0);
         error_message = "Failed to execute sigignore";
         goto finally;
     }
@@ -158,7 +169,7 @@ finally:
         ret = 1;
     }
     destroy_parser_defs();
-    //pop3_pool_destroy();
+    pop3_pool_destroy();
     if(selector != NULL) {
         selector_destroy(selector);
     }
