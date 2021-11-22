@@ -3,34 +3,32 @@
 #include <pop3admin.h>
 #define MIN_DGRAM_SIZE 14
 
-
-
 static bool cmp_str(uint8_t * str1, uint8_t * str2, uint8_t size);
 
-static void send_admin_resp(int fd, int status, char * message, struct sockaddr_in6 client_addr, size_t client_addr_len);
-static void stats_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len);
-static void get_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len);
-static void set_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len);
-static void get_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len);
-static void set_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len);
-static void get_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len);
-static void set_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len);
+static void send_admin_resp(int fd, int status, char * message, struct sockaddr_storage client_addr, size_t client_addr_len);
+static void stats_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len);
+static void get_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len);
+static void set_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len);
+static void get_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len);
+static void set_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len);
+static void get_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len);
+static void set_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len);
 
 static int filter_cmd_size = 0;
 static int error_file_size = 0;
 
-static void(* admin_actions[COMMAND_SIZE])(int, int, struct t_admin_req *, struct sockaddr_in6, size_t) = {
+static void(* admin_actions[COMMAND_SIZE])(int, int, struct t_admin_req *, struct sockaddr_storage, size_t) = {
     stats_handler, get_timeout_handler, set_timeout_handler, get_filter_handler, 
     set_filter_handler, get_error_handler, set_error_handler
 };
 
 void admin_parse(struct selector_key* key) {
     uint8_t buffer[DGRAM_SIZE];
-	struct sockaddr_in6 client_address;
+	struct sockaddr_storage client_address;
 	int read_chars;
     unsigned int len = sizeof(client_address);
-
-	read_chars = recvfrom(key->fd, buffer, DGRAM_SIZE, 0, (struct sockaddr*) &client_address, &len);
+    
+	read_chars = recvfrom(key->fd, buffer, DGRAM_SIZE, 0, (struct sockaddr *) &client_address, &len);
     if(read_chars <= 0) {
         log(ERROR, "%s", "Error reading datagram");
         return;
@@ -68,7 +66,7 @@ void admin_destroy() {
         free(proxy_config->error_file_path);
 }
 
-static void send_admin_resp(int fd, int status, char * message, struct sockaddr_in6 client_addr, size_t client_addr_len) {
+static void send_admin_resp(int fd, int status, char * message, struct sockaddr_storage client_addr, size_t client_addr_len) {
     char resp[DGRAM_SIZE];
     ssize_t len = snprintf(resp, DGRAM_SIZE, "%s%c%s\r\n", ADMIN_VERSION_STR, status, message);
     if (len < 0) {
@@ -88,10 +86,10 @@ static bool cmp_str(uint8_t * str1, uint8_t * str2, uint8_t size) {
     return true;
 }
 
-static void stats_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len) {
+static void stats_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len) {
     char resp[DATA_SIZE] = {0};
     if (snprintf((char *) resp, DATA_SIZE,  
-            "HISTORIC CONNECTIONS: %ld\nCURRENT CONNECTIONS: %ld\nTRANSFERRED BYTES: %ld",
+            "HISTORIC CONNECTIONS: %zu\nCURRENT CONNECTIONS: %zu\nTRANSFERRED BYTES: %zu",
             historic_connections, current_connections, transferred_bytes) < 0) {
         send_admin_resp(fd, INTERNAL_ERROR, "ERROR CREATING RESPONSE", client_addr, client_addr_len);
         return;
@@ -100,7 +98,7 @@ static void stats_handler(int fd, int request_len, struct t_admin_req * request,
     send_admin_resp(fd, OK, resp, client_addr, client_addr_len);
 }
 
-static void get_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+static void get_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len){
     char resp[DATA_SIZE] = {0};
     if (snprintf(resp , DATA_SIZE, "TIMEOUT: %f\r\n", client_timeout)< 0){
         send_admin_resp(fd, INTERNAL_ERROR, "ERROR CREATING RESPONSE", client_addr, client_addr_len);
@@ -110,7 +108,7 @@ static void get_timeout_handler(int fd, int request_len, struct t_admin_req * re
     send_admin_resp(fd, OK, resp, client_addr, client_addr_len);
 }
 
-static void set_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+static void set_timeout_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len){
     char tmp[DATA_SIZE] = {0};
 
     if (request_len == HEADER_SIZE) {
@@ -125,7 +123,7 @@ static void set_timeout_handler(int fd, int request_len, struct t_admin_req * re
     send_admin_resp(fd, OK, "CHANGED TIMEOUT", client_addr, client_addr_len);
 }
 
-static void get_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+static void get_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len){
     if (proxy_config->pop3_filter_command == NULL) {
         send_admin_resp(fd, OK, "FILTER COMMAND: NONE", client_addr, client_addr_len);
         return;
@@ -141,18 +139,27 @@ static void get_filter_handler(int fd, int request_len, struct t_admin_req * req
 }
 
 
-static void set_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+static void set_filter_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len){
     if (request_len == HEADER_SIZE) { 
         send_admin_resp(fd, INVALID_ARGS, "MISSING DATA", client_addr, client_addr_len);
         return;
     }
 
     if (filter_cmd_size == 0) {
-        filter_cmd_size = request_len - HEADER_SIZE;
         proxy_config->pop3_filter_command = malloc(request_len - HEADER_SIZE);
-    } else if (filter_cmd_size < request_len - HEADER_SIZE) {
+        if (proxy_config->pop3_filter_command == NULL) {
+            send_admin_resp(fd, INTERNAL_ERROR, "ERROR ALLOCATING MEMORY FOR CMD", client_addr, client_addr_len);
+            return;
+        }
         filter_cmd_size = request_len - HEADER_SIZE;
-        proxy_config->pop3_filter_command = realloc(proxy_config->pop3_filter_command, request_len - HEADER_SIZE);
+    } else if (filter_cmd_size < request_len - HEADER_SIZE) {
+        void * aux = realloc(proxy_config->pop3_filter_command, request_len - HEADER_SIZE);
+        if (aux == NULL) {
+            send_admin_resp(fd, INTERNAL_ERROR, "ERROR ALLOCATING MEMORY FOR CMD", client_addr, client_addr_len);
+            return;
+        }
+        proxy_config->pop3_filter_command = aux;
+        filter_cmd_size = request_len - HEADER_SIZE;
     }
 
     int i;
@@ -164,7 +171,7 @@ static void set_filter_handler(int fd, int request_len, struct t_admin_req * req
     send_admin_resp(fd, OK, "CHANGED FILTER PROGRAM", client_addr, client_addr_len);
 }
 
-static void get_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+static void get_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len){
     char resp[DATA_SIZE] = {0};
     if (snprintf(resp, DATA_SIZE, "ERROR FILE: %s", proxy_config->error_file_path) < 0) {
         send_admin_resp(fd, INTERNAL_ERROR, "ERROR CREATING RESPONSE", client_addr, client_addr_len);
@@ -174,18 +181,27 @@ static void get_error_handler(int fd, int request_len, struct t_admin_req * requ
     send_admin_resp(fd, OK, resp, client_addr, client_addr_len);
 }
 
-static void set_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_in6 client_addr, size_t client_addr_len){
+static void set_error_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len){
     if (request_len == HEADER_SIZE) { 
         send_admin_resp(fd, INVALID_ARGS, "MISSING DATA", client_addr, client_addr_len);
         return;
     }
 
     if (error_file_size == 0) {
-        error_file_size = request_len - HEADER_SIZE;
         proxy_config->error_file_path = malloc(request_len - HEADER_SIZE);
-    } else if (error_file_size < request_len - HEADER_SIZE) {
+        if (proxy_config->error_file_path == NULL) {
+            send_admin_resp(fd, INTERNAL_ERROR, "ERROR ALLOCATING MEMORY FOR PATH", client_addr, client_addr_len);
+            return;
+        }
         error_file_size = request_len - HEADER_SIZE;
-        proxy_config->error_file_path = realloc(proxy_config->error_file_path, request_len - HEADER_SIZE);
+    } else if (error_file_size < request_len - HEADER_SIZE) {
+        void * aux = realloc(proxy_config->error_file_path, request_len - HEADER_SIZE);
+        if (aux == NULL) {
+            send_admin_resp(fd, INTERNAL_ERROR, "ERROR ALLOCATING MEMORY FOR PATH", client_addr, client_addr_len);
+            return;
+        }
+        proxy_config->error_file_path = aux;
+        filter_cmd_size = request_len - HEADER_SIZE;
     }
 
     int i;
