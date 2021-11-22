@@ -1,3 +1,5 @@
+// This is a personal academic project. Dear PVS-Studio, please check it.
+// PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include <pop3nio.h>
 
 #define ATTACHMENT(key) ( (struct pop3 *)(key)->data)
@@ -507,9 +509,7 @@ static int resolve_origin(struct selector_key* key) {
         return FAILURE;
         
     memcpy(k, key, sizeof(*k));
-    if (pthread_create(&tid, 0, blocking_resolve_origin, k) == -1 
-        || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS){
-        
+    if (pthread_create(&tid, 0, blocking_resolve_origin, k) == -1 || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS){
         return FAILURE_WITH_MESSAGE; // TODO mensaje para el cliente
     }
     return RESOLVE_ORIGIN;
@@ -572,7 +572,9 @@ static int connection(struct selector_key* key) {
     char buff[SOCKADDR_TO_HUMAN_MIN]; // TODO podria ser una funcion print_connection
 
     if (getsockopt(key->fd, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
-        selector_set_interest_key(key, OP_NOOP);
+        if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
+            return FAILURE;
+
         if(pop3_ptr->current_res != NULL)
             pop3_ptr->current_res = pop3_ptr->current_res->ai_next;
 
@@ -715,6 +717,13 @@ static int request_read(struct selector_key* key) {
         if (end_of_line_state->type == STRING_CMP_EQ) {
             command_node node = calloc(1, sizeof(t_node));
 
+            if(node == NULL) {
+                pop3_ptr->error_message.message = "-ERR Error allocating memory";//TODO otro mensaje
+                if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
+                    return FAILURE;
+                
+                return FAILURE_WITH_MESSAGE;
+            }
             node->command = pop3_ptr->current_command;
             node->command_len = i + 1 - last_command_end + pop3_ptr->unmatched_len;
             node->has_args = pop3_ptr->has_args;
@@ -1062,7 +1071,6 @@ static int transform_failure(struct selector_key* key) {
     buffer_reset(&pop3_ptr->origin_to_client);
     if (pop3_ptr->response.is_done) {
         pop3_ptr->response.end_string = "-ERR Transform failed\r\n";
-        pop3_ptr->response.is_done = true;
         pop3_ptr->response.end_string_len = 23;
         return RESPONSE;
     }
