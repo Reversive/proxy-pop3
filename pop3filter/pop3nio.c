@@ -1396,6 +1396,8 @@ static struct pop3* pop3_new(int client_fd) {
     //memset(pop3_ptr, 0x00, sizeof(*pop3_ptr));
     pop3_ptr->origin_fd = -1;
     pop3_ptr->client_fd = client_fd;
+    pop3_ptr->current_res = NULL;
+    pop3_ptr->origin_resolution = NULL;
     pop3_ptr->unmatched_len = 0;
     pop3_ptr->client_address_len = sizeof(client_fd);
     pop3_ptr->stm.initial = RESOLVE_ORIGIN;
