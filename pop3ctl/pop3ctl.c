@@ -99,6 +99,8 @@ int main(int argc, char* argv[]) {
 
         n = recvfrom(sockfd, (char*)buffer, MAX_LINE, MSG_WAITALL, (struct sockaddr*)&servaddr, &len);
 
+        
+
         buffer[n] = '\0';
         t_admin_resp * resp = (t_admin_resp *) buffer;
         printf("%s\n", resp->data);
