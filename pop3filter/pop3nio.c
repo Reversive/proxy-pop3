@@ -376,6 +376,11 @@ void init_parsers(struct pop3* pop3_ptr) {
     log(DEBUG, "%s", "Initializing parsers");
     pop3_ptr->hello_state.hello_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
     pop3_ptr->request.end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
+    pop3_ptr->response.end_of_line_parser = NULL;
+    pop3_ptr->capa.end_of_multiline_parser = NULL;
+    pop3_ptr->transform.dot_parser = NULL;
+    pop3_ptr->transform.end_parser = NULL;
+    pop3_ptr->capa.pipelining_parser = NULL;
 
     for (int i = 0; i < COMMANDS; i++) {
         pop3_ptr->parsers[i] = parser_init(parser_no_classes(), defs[i]);
@@ -1206,6 +1211,7 @@ static int transform_write(struct selector_key * key) {
             const struct parser_event* end_state = parser_feed(pop3_ptr->transform.end_parser, ptr[i]);
             if(end_state->type == STRING_CMP_EQ) {
                 parser_destroy(pop3_ptr->transform.end_parser);
+                pop3_ptr->transform.end_parser = NULL;
                 pop3_ptr->transform.found_end = true;
                 break;
             } else if(end_state->type == STRING_CMP_NEQ) {
@@ -1331,6 +1337,8 @@ static int transform_read(struct selector_key * key) {
     }
     
     parser_destroy(pop3_ptr->transform.dot_parser);
+    pop3_ptr->transform.dot_parser = NULL;
+
     close(pop3_ptr->transform.read_fd);
     buffer_read_adv(&pop3_ptr->transform.pipe_to_proxy, read_size);
 
@@ -1443,10 +1451,11 @@ static void update_last_activity(struct selector_key* key) {
 static void pop3_timeout(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     if(pop3_ptr != NULL && difftime(time(NULL), pop3_ptr->last_activity) >= client_timeout) {
-        log(INFO, "%s\n", "Disconnecting client for inactivity");
+        log(INFO, "%s", "Disconnecting client for inactivity");
         pop3_ptr->error_message.message = "-ERR Disconnected for inactivity.\r\n";
         if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             pop3_done(key);
+
         jump(&pop3_ptr->stm, FAILURE_WITH_MESSAGE, key);
     }
 }
@@ -1492,6 +1501,7 @@ static void pop3_done(struct selector_key* key) {
     };
     struct pop3* pop3_ptr = ATTACHMENT(key);
 
+    log(DEBUG, "%s", "Client disconnected");
     current_connections--;
     if(current_connections == MAX_CONNECTIONS - 1) {
         if ((server_4 != -1 && selector_set_interest(key->s, server_4, OP_READ) != SELECTOR_SUCCESS) || 
@@ -1521,7 +1531,6 @@ static void pop3_destroy_(struct pop3* s) {
 
     parser_destroy(s->hello_state.hello_parser);
     parser_destroy(s->request.end_of_line_parser);
-    parser_destroy(s->capa.end_of_multiline_parser);
 
     if (s->transform.dot_parser != NULL) {
         parser_destroy(s->transform.dot_parser);
@@ -1553,6 +1562,7 @@ static void pop3_destroy_(struct pop3* s) {
 }
 
 static void pop3_destroy(struct pop3* s) {
+    log(DEBUG, "Calling destroy with value %d", s->references);
     if (s == NULL) {
     } else if (s->references == 1) {
         if (pool_size < max_pool) {
@@ -1571,6 +1581,6 @@ void pop3_pool_destroy(void) {
     struct pop3* next, * s;
     for (s = pool; s != NULL; s = next) {
         next = s->next;
-        free(s);
+        pop3_destroy_(s);
     }
 }

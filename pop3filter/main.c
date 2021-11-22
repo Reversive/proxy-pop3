@@ -8,12 +8,11 @@ int server_6 = -1;
 int admin_4 = -1;
 int admin_6 = -1;
 
-float client_timeout = 120.0;
+float client_timeout = 3.0;
 
 static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);
     done = true;
-
 }
 
 int main(int argc, char *argv[]) {
@@ -137,6 +136,7 @@ int main(int argc, char *argv[]) {
             last_activity = current_activity;
             selector_notify_timeout(selector); // Hacemos trigger del handle_timeout
         }
+
         if(status != SELECTOR_SUCCESS) {
             error_message = "Serving";
             goto finally;
