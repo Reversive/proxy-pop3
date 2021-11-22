@@ -9,7 +9,8 @@
 #define ADMIN_VERSION_STR "0.0"
 
 #define DGRAM_SIZE 512
-#define DATA_SIZE DGRAM_SIZE - 14
+#define HEADER_SIZE 14
+#define DATA_SIZE (DGRAM_SIZE - HEADER_SIZE)
 
 typedef struct t_admin_req {
     uint8_t     version[3];

@@ -31,8 +31,6 @@ int main(int argc, char* argv[]) {
         printf("Token must have 10 or less characters\n");
         return -1;
     }
-    printf("Client connect to %s:%d using token %s\n",
-        client_config->admin_server_address, client_config->admin_server_port, client_config->admin_token);
 
     int sockfd;
     char buffer[MAX_LINE];
@@ -93,17 +91,26 @@ int main(int argc, char* argv[]) {
         
         req_buff[j] = 0;
 
-        sendto(sockfd, (const char*) req_buff, j, MSG_CONFIRM, (const struct sockaddr*)&servaddr, sizeof(servaddr));
-
-        printf("%s\n", req_buff);
+        if (sendto(sockfd, (const char*) req_buff, j, MSG_CONFIRM, (const struct sockaddr*)&servaddr, sizeof(servaddr)) < 0){
+            perror("Error sending request to proxy");
+            return -1;
+        }
 
         n = recvfrom(sockfd, (char*)buffer, MAX_LINE, MSG_WAITALL, (struct sockaddr*)&servaddr, &len);
 
-        
+        if(n == -1){
+            perror("Error using recv");
+            return -1;
+        }
 
         buffer[n] = '\0';
         t_admin_resp * resp = (t_admin_resp *) buffer;
-        printf("%s\n", resp->data);
+
+        if(resp->status == 0){
+            printf("+OK\n%s\n", (char*) resp->data);
+        } else {
+            printf("-ERROR: %s\n", (char*) resp->data);
+        }
     }
     return 0;
 }
