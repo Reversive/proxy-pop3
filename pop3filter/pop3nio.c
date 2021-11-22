@@ -1511,8 +1511,6 @@ static void pop3_done(struct selector_key* key) {
 
     reset_parsers(pop3_ptr);
     reset_queue(pop3_ptr->commands_left);
-
-    pop3_destroy(pop3_ptr);
 }
 
 static void pop3_destroy_(struct pop3* s) {

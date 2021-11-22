@@ -17,10 +17,6 @@ static void sigterm_handler(const int signal) {
 }
 
 int main(int argc, char *argv[]) {
-
-    // t_admin_datagram datagram = *((t_admin_datagram *) &"0000\0holacomova\0\0");
-    // log(DEBUG, "%s-%s-%d", datagram.version, datagram.token, datagram.command);
-
     proxy_config = parse_options(argc, argv);
     close(STDIN);
     
@@ -28,7 +24,6 @@ int main(int argc, char *argv[]) {
     selector_status status      = SELECTOR_SUCCESS;
     fd_selector selector        = NULL;
 
-    // //IN6ADDR_ANY_INIT
     if(proxy_config->pop3_listen_address == NULL){
         server_6 = setup_server_socket("::", proxy_config->pop3_listen_port, IPPROTO_TCP, false);
         server_4 = setup_server_socket("0.0.0.0", proxy_config->pop3_listen_port, IPPROTO_TCP, true);
@@ -125,6 +120,11 @@ int main(int argc, char *argv[]) {
             error_message = "Failed registering admin fd";
             goto finally;
         }
+    }
+
+    if (sigignore(SIGCHLD) == -1) {
+        error_message = "Failed to execute sigignore";
+        goto finally;
     }
 
     time_t last_activity = time(NULL);
