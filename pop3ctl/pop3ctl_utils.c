@@ -32,6 +32,10 @@ void print_client_help() {
 
 client_config_ptr init_client_config() {
     client_config_ptr client_config     = malloc(sizeof(*client_config));
+    if(client_config == NULL) {
+        fprintf(stderr, "Error: Could not allocate memory for client config.\n");
+        exit(STATUS_ERROR);
+    }
     client_config->admin_token          = NULL;
     client_config->admin_server_address = "127.0.0.1";
     client_config->admin_server_port    = 9090;

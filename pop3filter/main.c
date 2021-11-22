@@ -172,6 +172,7 @@ finally:
     }
     destroy_parser_defs();
     pop3_pool_destroy();
+    admin_destroy();
     if(selector != NULL) {
         selector_destroy(selector);
     }

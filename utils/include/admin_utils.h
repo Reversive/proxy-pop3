@@ -10,17 +10,20 @@
 
 #define DGRAM_SIZE 512
 #define HEADER_SIZE 14
+#define VERSION_SIZE 3
+#define TOKEN_SIZE 10
+
 #define DATA_SIZE (DGRAM_SIZE - HEADER_SIZE)
 
 typedef struct t_admin_req {
-    uint8_t     version[3];
-    uint8_t     token[10];
+    uint8_t     version[VERSION_SIZE];
+    uint8_t     token[TOKEN_SIZE];
     uint8_t     command;
     uint8_t     data[DATA_SIZE];
 } t_admin_req;
 
 typedef struct t_admin_resp {
-    uint8_t     version[3];
+    uint8_t     version[VERSION_SIZE];
     uint8_t     status;
     uint8_t     data[DGRAM_SIZE - 4];
 } t_admin_resp;
@@ -45,7 +48,7 @@ enum response_stats {
 };
 
 #define LAST_COMMAND SET_ERROR_FILE
-#define COMMAND_SIZE LAST_COMMAND + 1
+#define COMMAND_SIZE (LAST_COMMAND + 1)
 #define MAX_COMMAND_LEN 15
 
 #endif

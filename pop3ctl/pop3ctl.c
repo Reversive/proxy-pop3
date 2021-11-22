@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
     }
 
     int sockfd;
-    char buffer[MAX_LINE];
+    char buffer[DGRAM_SIZE];
     struct sockaddr_in     servaddr;
 
     // Creating socket file descriptor
