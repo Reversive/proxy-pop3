@@ -222,6 +222,7 @@ struct capa_st {
     ptr_parser          pipelining_parser;
     bool                supports_pipelining;
     bool                has_started;
+    bool                has_dot;
 };
 
 struct transform_st {
@@ -372,7 +373,6 @@ void destroy_parser_defs() {
 }
 
 void init_parsers(struct pop3* pop3_ptr) {
-    //pop3_ptr->capa.end_of_multiline_parser = parser_init(parser_no_classes(), end_of_multiline_parser_def);
     log(DEBUG, "%s", "Initializing parsers");
     pop3_ptr->hello_state.hello_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
     pop3_ptr->request.end_of_line_parser = parser_init(parser_no_classes(), end_of_line_parser_def);
@@ -604,7 +604,6 @@ static int connection(struct selector_key* key) {
 
 static void hello_departure(struct selector_key *key) {
     struct pop3* pop3_ptr = ATTACHMENT(key);
-    //pop3_ptr->commands_left = new_command_queue();
     pop3_ptr->current_command = -1;
     for (int i = 0; i < COMMANDS; i++)
          pop3_ptr->request.parser_states[i] = 1;
@@ -615,8 +614,6 @@ static void hello_departure(struct selector_key *key) {
     pop3_ptr->checked_user = false;
     pop3_ptr->has_valid_user = false;
     pop3_ptr->may_have_args = false;
-
-    //parser_destroy(pop3_ptr->hello_state.hello_parser);
 
     if(proxy_config->pop3_filter_command != NULL) {
         buffer_init(&pop3_ptr->transform.proxy_to_pipe, BUFFER_SIZE, pop3_ptr->proxy_to_pipe_buffer);
@@ -821,13 +818,10 @@ static int request_write(struct selector_key* key){
 static int response_read(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
 
-    //log(DEBUG, "%s", "Entre al response read");
     
     size_t max_size;
     uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
-    //log(DEBUG, "Puedo escribir %ld bytes", max_size);
     ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
-    //log(DEBUG, "Lei %ld bytes", read_chars);
 
     if (read_chars <= 0) {
         pop3_ptr->error_message.message = "Error reading from origin";
@@ -889,7 +883,8 @@ static int response_read(struct selector_key* key) {
     if(pop3_ptr->response.is_done || !buffer_can_write(&pop3_ptr->origin_to_client)) {
         if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || 
             selector_set_interest(key->s, pop3_ptr->response.write_fd, OP_WRITE) != SELECTOR_SUCCESS || 
-            selector_set_interest(key->s, pop3_ptr->response.read_fd, OP_READ) != SELECTOR_SUCCESS)
+            (pop3_ptr->response.read_fd != pop3_ptr->origin_fd && 
+                selector_set_interest(key->s, pop3_ptr->response.read_fd, OP_READ) != SELECTOR_SUCCESS))
             return FAILURE;
     
         return pop3_ptr->current_return;
@@ -901,11 +896,8 @@ static int response_read(struct selector_key* key) {
 static int response_write(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     size_t max_size;    
-    //log(DEBUG, "Addr: %p", (void *) pop3_ptr->response.write_buffer);
+
     uint8_t* ptr = buffer_read_ptr(pop3_ptr->response.write_buffer, &max_size);
-
-    //log(DEBUG, "%s", "Entre al response write");
-
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, MSG_NOSIGNAL)) == -1) {
         pop3_ptr->error_message.message = "Error writing to client";
@@ -922,13 +914,14 @@ static int response_write(struct selector_key* key) {
     if (buffer_can_read(pop3_ptr->response.write_buffer)) // el buffer estará compactado, se puede escribir
         return RESPONSE;
 
-    if(!pop3_ptr->response.is_done){
-        //log(DEBUG, "%s", "Me vuelvo al TRANSFORM");
-        //log(DEBUG, "Los fd son: %d, %d, %d", key->fd, pop3_ptr->response.read_fd, pop3_ptr->response.write_fd);
+    if(!pop3_ptr->response.is_done) {
         if(selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS ||
             selector_set_interest(key->s, pop3_ptr->response.read_fd, OP_READ) != SELECTOR_SUCCESS ||
-            (pop3_ptr->response.write_fd != -1 && selector_set_interest(key->s, pop3_ptr->response.write_fd, OP_WRITE) != SELECTOR_SUCCESS))
+            (pop3_ptr->response.write_fd != -1 && 
+                pop3_ptr->response.write_fd != pop3_ptr->client_fd && 
+                selector_set_interest(key->s, pop3_ptr->response.write_fd, OP_WRITE) != SELECTOR_SUCCESS))
             return FAILURE;
+        
         //TODO arreglar esto para caso NO TRANSFORM
         return pop3_ptr->current_return;
     }
@@ -979,8 +972,12 @@ static int capa_read(struct selector_key* key) {
     }
 
     if (!pop3_ptr->capa.has_started) {
+        pop3_ptr->response.write_buffer = &pop3_ptr->origin_to_client;
+        pop3_ptr->response.write_fd = -1;
+
         pop3_ptr->capa.has_started = true;
         pop3_ptr->response.is_done = false;
+        pop3_ptr->capa.has_dot = false;
         pop3_ptr->current_return = CAPA;
         pop3_ptr->response.read_fd = pop3_ptr->origin_fd;
         pop3_ptr->response.end_string_len = 0;
@@ -996,7 +993,7 @@ static int capa_read(struct selector_key* key) {
         }
     }
 
-    size_t dot_idx = read_chars;
+    ssize_t dot_idx = read_chars;
     for(int i = 0; i < read_chars; i++) {
         if(!pop3_ptr->capa.supports_pipelining) {
             const struct parser_event* pipelining_state = parser_feed(pop3_ptr->capa.pipelining_parser, ptr[i]);
@@ -1009,10 +1006,11 @@ static int capa_read(struct selector_key* key) {
 
         const struct parser_event* end_state = parser_feed(pop3_ptr->capa.end_of_multiline_parser, ptr[i]);
         
+        //\r\n.\r\n
         if(end_state->type == STRING_CMP_EQ) {
             if(!pop3_ptr->capa.supports_pipelining) {
                 pop3_ptr->response.end_string = "PIPELINING\r\n.\r\n";
-                pop3_ptr->response.end_string_len = 13;
+                pop3_ptr->response.end_string_len = 15;
             } else{
                 pop3_ptr->response.end_string = END_STRING;
                 pop3_ptr->response.end_string_len = 3;
@@ -1030,7 +1028,12 @@ static int capa_read(struct selector_key* key) {
             return RESPONSE;
         } else if(end_state->type == STRING_CMP_NEQ) {
             parser_reset(pop3_ptr->capa.end_of_multiline_parser);
+            if (ptr[i] == '\r')
+                parser_feed(pop3_ptr->capa.end_of_multiline_parser, '\r');
         } else if (ptr[i] == '.') {
+            dot_idx = i;
+            pop3_ptr->capa.has_dot = true;
+        } else if (pop3_ptr->capa.has_dot && ptr[i] == '\r' && dot_idx == read_chars) {
             dot_idx = i;
         }
     }
@@ -1148,15 +1151,8 @@ static int transform_init(struct selector_key* key) {
     }
     
     pop3_ptr->references++;
-    //origTclt
-    //cltTorig
-    //transfBuff
     pop3_ptr->response.write_buffer = &pop3_ptr->transform_buffer;
     buffer_init(&pop3_ptr->transform_buffer, BUFFER_SIZE, pop3_ptr->read_buffer);
-    //buffer_init(pop3_ptr->response.write_buffer, BUFFER_SIZE, pop3_ptr->read_buffer); 
-    
-    // pop3_ptr->response.read_buffer = pop3_ptr->transform.pipe_to_proxy;
-    // pop3_ptr->response.write_buffer = pop3_ptr->transform.proxy_to_pipe;
     return TRANSFORM;
 }
 
@@ -1165,12 +1161,6 @@ static int transform_write(struct selector_key * key) {
     size_t max_size;
     uint8_t * ptr;
 
-    //log(DEBUG, "%s", "Entre al transform write");
-
-    // if (!pop3_ptr->transform.is_done) {
-    //     pop3_ptr->transform.is_done = pop3_ptr->response.is_done;
-    //     pop3_ptr->response.is_done = false;
-    // }
     pop3_ptr->response.is_done = false;
 
     if (!pop3_ptr->transform.skipped_line) {
@@ -1278,8 +1268,6 @@ static int transform_write(struct selector_key * key) {
 static int transform_read(struct selector_key * key) { 
     struct pop3 *pop3_ptr = ATTACHMENT(key);
 
-    //log(DEBUG, "%s", "Entre al transform read");
-
     size_t max_size;
     uint8_t * ptr;
     if (!pop3_ptr->transform.started_reading) {
@@ -1289,12 +1277,10 @@ static int transform_read(struct selector_key * key) {
         buffer_write_adv(pop3_ptr->response.write_buffer, strlen(response));
         pop3_ptr->transform.started_reading = true;
         parser_reset(pop3_ptr->transform.dot_parser);
-        //buffer_compact(&pop3_ptr->transform.pipe_to_proxy); //TODO, no hace falta en realidad, pensar los casos
     }
 
     ptr = buffer_write_ptr(pop3_ptr->response.write_buffer, &max_size);
     if (max_size <= 1) { // TODO CHEQUEAR ESTO
-        //log(DEBUG, "%s", "No habia espacio, me voy a response write");
         if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || 
             (pop3_ptr->transform.write_fd != -1 && selector_set_interest(key->s, pop3_ptr->transform.write_fd, OP_NOOP) != SELECTOR_SUCCESS) ||
             selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
@@ -1304,7 +1290,7 @@ static int transform_read(struct selector_key * key) {
     }
 
     size_t read_size;
-    uint8_t * read_ptr = buffer_write_ptr(&pop3_ptr->transform.pipe_to_proxy, &read_size);//malloc(sizeof(uint8_t) * max_size / 2);
+    uint8_t * read_ptr = buffer_write_ptr(&pop3_ptr->transform.pipe_to_proxy, &read_size);
     read_size = (read_size > max_size) ? max_size : read_size;
     
     ssize_t read_chars = read(pop3_ptr->transform.read_fd, read_ptr, read_size / 2);
@@ -1335,10 +1321,6 @@ static int transform_read(struct selector_key * key) {
         buffer_read_adv(&pop3_ptr->transform.pipe_to_proxy, read_size);
         buffer_write_adv(pop3_ptr->response.write_buffer, write_idx);
 
-        // if(buffer_can_write(pop3_ptr->response.write_buffer))
-        //     return TRANSFORM;
-        
-        //log(DEBUG, "%s", "Me voy al response write");
         if ((pop3_ptr->response.write_fd != -1 && 
             selector_set_interest(key->s, pop3_ptr->transform.write_fd, OP_NOOP) != SELECTOR_SUCCESS) || 
             selector_set_interest(key->s, pop3_ptr->transform.read_fd, OP_NOOP) != SELECTOR_SUCCESS ||
@@ -1349,7 +1331,6 @@ static int transform_read(struct selector_key * key) {
     }
     
     parser_destroy(pop3_ptr->transform.dot_parser);
-   //log(DEBUG, "%s", "Closing transform read file descriptor");
     close(pop3_ptr->transform.read_fd);
     buffer_read_adv(&pop3_ptr->transform.pipe_to_proxy, read_size);
 
@@ -1403,9 +1384,6 @@ void pop3_passive_accept(struct selector_key* key) {
         goto fail;
     }
 
-    //state->references++;
-
-
     current_connections++;    
     if(current_connections == MAX_CONNECTIONS && 
         ((server_4 != -1 && selector_set_interest(key->s, server_4, OP_NOOP) != SELECTOR_SUCCESS) || 
@@ -1431,11 +1409,11 @@ static struct pop3* pop3_new(int client_fd) {
         pop3_ptr->commands_left = new_command_queue();
     } else {
         pop3_ptr = pool;
+        reset_parsers(pop3_ptr);
         pool = pool->next;
         pop3_ptr->next = 0;
     }
 
-    //memset(pop3_ptr, 0x00, sizeof(*pop3_ptr));
     pop3_ptr->origin_fd = -1;
     pop3_ptr->client_fd = client_fd;
     pop3_ptr->current_res = NULL;
@@ -1453,7 +1431,6 @@ static struct pop3* pop3_new(int client_fd) {
     buffer_init(&pop3_ptr->origin_to_client, BUFFER_SIZE, pop3_ptr->write_buffer);
     pop3_ptr->references = 1;
 
-    // init_parsers(pop3_ptr);
     return pop3_ptr;
 }
 
@@ -1533,19 +1510,8 @@ static void pop3_done(struct selector_key* key) {
     }
 
     reset_parsers(pop3_ptr);
-    // TODO reset queue
     reset_queue(pop3_ptr->commands_left);
 
-
-
-    // parser_destroy(pop3_ptr->request.end_of_line_parser);
-    // parser_destroy(pop3_ptr->capa.end_of_multiline_parser);
-    // if (proxy_config->pop3_filter_command != NULL) {
-    //     parser_destroy(pop3_ptr->transform.dot_parser);
-    //     parser_destroy(pop3_ptr->transform.end_parser);
-    // }
-
-    // queue_destroy(pop3_ptr->commands_left);
     pop3_destroy(pop3_ptr);
 }
 
@@ -1558,10 +1524,7 @@ static void pop3_destroy_(struct pop3* s) {
     parser_destroy(s->hello_state.hello_parser);
     parser_destroy(s->request.end_of_line_parser);
     parser_destroy(s->capa.end_of_multiline_parser);
-    // if (proxy_config->pop3_filter_command != NULL) {
-    //     parser_destroy(s->transform.dot_parser);
-    //     parser_destroy(s->transform.end_parser);
-    // }
+
     if (s->transform.dot_parser != NULL) {
         parser_destroy(s->transform.dot_parser);
         s->transform.dot_parser = NULL;
