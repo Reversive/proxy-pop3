@@ -1,3 +1,5 @@
+// This is a personal academic project. Dear PVS-Studio, please check it.
+// PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include <parse_options.h>
 
 
@@ -36,6 +38,10 @@ void print_help() {
 
 proxy_configuration_ptr init_proxy_config() {
     proxy_configuration_ptr proxy_config    = malloc(sizeof(proxy_configuration));
+    if(proxy_config == NULL) {
+        log(FATAL, "%s", "Error while allocating memory for proxy configuration.\n");
+        exit(STATUS_ERROR);
+    }
     proxy_config->error_file_path           = "/dev/null";
     proxy_config->pop3_listen_address       = NULL;
     proxy_config->admin_listen_address      = NULL;

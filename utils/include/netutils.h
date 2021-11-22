@@ -19,26 +19,6 @@
 + */
 const char * sockaddr_to_human(char *buff, const size_t buffsize, const struct sockaddr *addr);
 
-
-
-/**
- * Escribe n bytes de buff en fd de forma bloqueante
- *
- * Retorna 0 si se realizÃ³ sin problema y errno si hubo problemas
- */
-int
-sock_blocking_write(const int fd, t_buffer_ptr b);
-
-
-/**
- * copia todo el contenido de source a dest de forma bloqueante.
- *
- * Retorna 0 si se realizÃ³ sin problema y errno si hubo problemas
- */
-int
-sock_blocking_copy(const int source, const int dest);
-
-
 int is_ipv6(const char* host);
 
 int is_ipv4(const char* host);

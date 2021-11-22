@@ -1,3 +1,5 @@
+// This is a personal academic project. Dear PVS-Studio, please check it.
+// PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include <main.h>
 
 proxy_configuration_ptr proxy_config;
@@ -8,7 +10,7 @@ int server_6 = -1;
 int admin_4 = -1;
 int admin_6 = -1;
 
-float client_timeout = 3.0;
+float client_timeout = 120.0;
 
 static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);
