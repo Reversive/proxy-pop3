@@ -397,10 +397,6 @@ static void reset_parsers(struct pop3* pop3_ptr) {
 }
 
 
-int is_valid_ip(const char* host) {
-    return is_ipv4(host) || is_ipv6(host);
-}
-
 static void* blocking_resolve_origin(void* k) {
     struct selector_key* key = (struct selector_key*)k;
     struct pop3* pop3_ptr = ATTACHMENT(key);
@@ -435,10 +431,6 @@ finally:
     selector_notify_block(key->s, key->fd);
     free(k);
     return NULL;
-}
-
-void send_error(int fd, const char* error) {
-    send(fd, error, strlen(error), MSG_NOSIGNAL);
 }
 
 
@@ -948,8 +940,7 @@ static int response_write(struct selector_key* key) {
     }
 
     if (pop3_ptr->response.end_string_len != 0) {
-        size_t max_size;
-        uint8_t * ptr = buffer_write_ptr(pop3_ptr->response.write_buffer, &max_size);
+        ptr = buffer_write_ptr(pop3_ptr->response.write_buffer, &max_size);
         memcpy(ptr, pop3_ptr->response.end_string, pop3_ptr->response.end_string_len);
         buffer_write_adv(pop3_ptr->response.write_buffer, pop3_ptr->response.end_string_len);
         pop3_ptr->response.end_string_len = 0;
