@@ -4,16 +4,19 @@
 #include <stdint.h>
 
 #define ADMIN_VERSION ((uint8_t *) "0.0")
-#define ADMIN_TOKEN ((uint8_t *)"SECRETPROX")
+#define ADMIN_TOKEN ((uint8_t *) "SECRETPROX")
 #define ADMIN_TOKEN_STR "SECRETPROX"
 #define ADMIN_VERSION_STR "0.0"
+#define ADMIN_LINE_END_STR "\r\n"
+#define ADMIN_LINE_END ((uint8_t *) ADMIN_LINE_END_STR)
+#define ADMIN_LINE_END_LEN 2
 
 #define DGRAM_SIZE 512
 #define HEADER_SIZE 14
 #define VERSION_SIZE 3
 #define TOKEN_SIZE 10
 
-#define DATA_SIZE (DGRAM_SIZE - HEADER_SIZE)
+#define DATA_SIZE (DGRAM_SIZE - HEADER_SIZE - ADMIN_LINE_END_LEN)
 
 typedef struct t_admin_req {
     uint8_t     version[VERSION_SIZE];
@@ -25,7 +28,7 @@ typedef struct t_admin_req {
 typedef struct t_admin_resp {
     uint8_t     version[VERSION_SIZE];
     uint8_t     status;
-    uint8_t     data[DGRAM_SIZE - 4];
+    uint8_t     data[DGRAM_SIZE - VERSION_SIZE - 1];
 } t_admin_resp;
 
 enum admin_commands {

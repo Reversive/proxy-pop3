@@ -22,6 +22,9 @@ client_config_ptr client_config;
 static int get_command_number(const char* cmd);
 static void print_help();
 
+static int parse_admin_response(t_admin_resp * response, uint8_t * buffer, int buff_len);
+static bool cmp_str(uint8_t * str1, uint8_t * str2, uint8_t size);
+
 int main(int argc, char* argv[]) {
     client_config = parse_client_options(argc, argv);
 
@@ -90,8 +93,9 @@ int main(int argc, char* argv[]) {
         req_buff[13] = (char) curr_command;
         for (j = 14; i < read_chars_in; i++, j++)
             req_buff[j] = stdin_buffer[i];
-        
-        req_buff[j] = 0;
+
+        memcpy(req_buff + j, ADMIN_LINE_END_STR, ADMIN_LINE_END_LEN);
+        j += ADMIN_LINE_END_LEN;
 
         if (sendto(sockfd, (const char*) req_buff, j, MSG_CONFIRM, (const struct sockaddr*)&servaddr, sizeof(servaddr)) < 0){
             perror("Error sending request to proxy");
@@ -105,17 +109,66 @@ int main(int argc, char* argv[]) {
             return -1;
         }
 
-        buffer[n] = '\0';
-        t_admin_resp * resp = (t_admin_resp *) buffer;
+        t_admin_resp response;
+        if (parse_admin_response(&response, (uint8_t *) buffer, n) != 0) {
+            printf("Invalid response from origin");
+            continue;
+        }
 
-        if(resp->status == 0){
-            printf("+OK\n%s\n", (char*) resp->data);
+        if(response.status == 0){
+            printf("+OK\n%s\n", (char*) response.data);
         } else {
-            printf("-ERROR: %s\n", (char*) resp->data);
+            printf("-ERROR: %s\n", (char*) response.data);
         }
     }
     return 0;
 }
+
+static int parse_admin_response(t_admin_resp * response, uint8_t * buffer, int buff_len) {
+    if (buff_len < VERSION_SIZE + 1) {
+
+        printf("len\n");
+        return 1;
+    }
+    
+    if (!cmp_str(buffer, ADMIN_VERSION, VERSION_SIZE)) {
+        printf("Vers\n");
+        return 1;
+    }
+    
+    memcpy(response->version, buffer, VERSION_SIZE);
+    buffer += VERSION_SIZE;
+
+    if (*buffer >= INTERNAL_ERROR) {
+        printf("Buff %d\n", *buffer);
+        return 1;
+    }
+    
+    response->status =  *buffer;
+    buffer = buffer + 1;
+
+    memcpy(response->data, buffer, buff_len - VERSION_SIZE - ADMIN_LINE_END_LEN - 1);
+    response->data[buff_len - VERSION_SIZE - ADMIN_LINE_END_LEN - 1] = '\0';
+
+    buffer += buff_len - VERSION_SIZE - ADMIN_LINE_END_LEN - 1;
+    if (!cmp_str(buffer, ADMIN_LINE_END, ADMIN_LINE_END_LEN)) {
+        printf("END\n");
+        return 1;
+    }
+
+    return 0;
+}
+
+
+static bool cmp_str(uint8_t * str1, uint8_t * str2, uint8_t size) {
+	for (int i = 0; i < size; i++) {
+        if (str1[i] != str2[i]) 
+            return false;
+    }
+    
+    return true;
+}
+
 
 static int get_command_number(const char* cmd) {
     for (int i = 0; i < COMMAND_SIZE; i++) {

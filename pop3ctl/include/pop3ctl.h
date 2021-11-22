@@ -11,6 +11,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <admin_utils.h>
+#include <stdbool.h>
 
 #define MAX_LINE 100
 
