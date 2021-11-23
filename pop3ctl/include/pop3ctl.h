@@ -12,17 +12,24 @@
 #include <netinet/in.h>
 #include <admin_utils.h>
 #include <stdbool.h>
+#include <logger.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+
 
 #define MAX_LINE 100
 
 typedef struct client_configuration_t {
     char *      admin_server_address;
     char *      admin_token;
-    uint16_t    admin_server_port;
+    char *      admin_server_port;
 } client_configuration_t;
 
 typedef struct client_configuration_t * client_config_ptr;
 
 #include <pop3ctl_utils.h>
+
+
 
 #endif

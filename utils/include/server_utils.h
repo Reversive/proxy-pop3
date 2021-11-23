@@ -21,7 +21,7 @@
 * @param listen_addr  la dirección en la que escucha el servidor
 * @param service      el puerto deseado
 *
-* @param protocol     el protocolo de transport (i.e TCP, UDP)
+* @param protocol     el protocolo de transporte (i.e TCP, UDP)
 * @param isipv4       si el param listen_addr es ipv4
 *
 */

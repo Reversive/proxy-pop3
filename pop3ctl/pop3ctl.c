@@ -21,6 +21,7 @@ client_config_ptr client_config;
 
 static int get_command_number(const char* cmd);
 static void print_help();
+static int udpClientSocket(const char *host, const char *service, struct addrinfo **serv_addr);
 
 static int parse_admin_response(t_admin_resp * response, uint8_t * buffer, int buff_len);
 static bool cmp_str(uint8_t * str1, uint8_t * str2, uint8_t size);
@@ -40,23 +41,22 @@ int main(int argc, char* argv[]) {
 
     int sockfd;
     char buffer[DGRAM_SIZE];
-    struct sockaddr_in     servaddr;
 
     // Creating socket file descriptor
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        perror("socket creation failed\n");
-        exit(EXIT_FAILURE);
+
+    struct addrinfo * servaddr;
+    //socklen_t len = sizeof(servaddr);
+    sockfd = udpClientSocket(client_config->admin_server_address, client_config->admin_server_port, &servaddr);
+    if (sockfd == -1) {
+        log(ERROR, "%s", "Error creating socket");
+        return -1;
     }
 
-    memset(&servaddr, 0, sizeof(servaddr));
-    // Filling server information
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(client_config->admin_server_port);
-    servaddr.sin_addr.s_addr = INADDR_ANY;
+    struct sockaddr_storage fromAddr; // Source address of server
+    socklen_t fromAddrLen = sizeof(fromAddr);
 
     ssize_t n;
-    socklen_t len = sizeof(servaddr);
-
+    
     int i, j, curr_command, read_chars_in;
     char command[MAX_COMMAND_LEN];
     char req_buff[DGRAM_SIZE] = { 0 };
@@ -98,12 +98,13 @@ int main(int argc, char* argv[]) {
         memcpy(req_buff + j, ADMIN_LINE_END_STR, ADMIN_LINE_END_LEN);
         j += ADMIN_LINE_END_LEN;
 
-        if (sendto(sockfd, (const char*) req_buff, j, MSG_CONFIRM, (const struct sockaddr*)&servaddr, sizeof(servaddr)) < 0){
+
+        if (sendto(sockfd, (const char*) req_buff, j, MSG_CONFIRM, servaddr->ai_addr, servaddr->ai_addrlen) < 0){
             perror("Error sending request to proxy");
             return -1;
         }
 
-        n = recvfrom(sockfd, (char*)buffer, MAX_LINE, MSG_WAITALL, (struct sockaddr*)&servaddr, &len);
+        n = recvfrom(sockfd, (char *) buffer, MAX_LINE, MSG_WAITALL, (struct sockaddr *) &fromAddr, &fromAddrLen);
 
         if(n == -1){
             perror("Error using recv");
@@ -187,3 +188,28 @@ static void print_help(){
         printf("%s\n", commands[i].help_str);
     }
 }
+
+static int udpClientSocket(const char *host, const char *service, struct addrinfo **serv_addr) {
+	struct addrinfo addr_criteria;                   // Criteria for address match
+	memset(&addr_criteria, 0, sizeof(addr_criteria)); // Zero out structure
+	addr_criteria.ai_family = AF_UNSPEC;             // v4 or v6 is OK
+	addr_criteria.ai_socktype = SOCK_DGRAM;        
+	addr_criteria.ai_protocol = IPPROTO_UDP;         
+
+	int rtnVal = getaddrinfo(host, service, &addr_criteria, serv_addr);
+	if (rtnVal != 0) {
+		log(ERROR, "getaddrinfo() failed %s", gai_strerror(rtnVal))
+		return -1;
+	}
+
+	int sock = -1;
+	for (struct addrinfo *addr = *serv_addr; addr != NULL; addr = addr->ai_next) {
+		sock = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
+		if (sock >= 0) {
+            break;
+		} 
+	}
+
+	return sock;
+}
+

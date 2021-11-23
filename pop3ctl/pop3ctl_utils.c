@@ -38,7 +38,7 @@ client_config_ptr init_client_config() {
     }
     client_config->admin_token          = NULL;
     client_config->admin_server_address = "127.0.0.1";
-    client_config->admin_server_port    = 9090;
+    client_config->admin_server_port    = "9090";
     return client_config;
 }
 
@@ -52,7 +52,7 @@ client_config_ptr parse_client_options(int argc, char *argv[]) {
             print_client_help();
             break;
         case 'P':
-            client_config->admin_server_port = atoi(optarg);
+            client_config->admin_server_port = optarg;
             break;
         case 't':
             client_config->admin_token = optarg;
