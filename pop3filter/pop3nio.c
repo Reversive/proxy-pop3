@@ -1037,6 +1037,8 @@ static int capa_read(struct selector_key* key) {
             const struct parser_event* pipelining_state = parser_feed(pop3_ptr->capa.pipelining_parser, ptr[i]);
             if(pipelining_state->type == STRING_CMP_EQ) {
                 pop3_ptr->capa.supports_pipelining = true;
+                parser_destroy(&pop3_ptr->capa.pipelining_parser);
+                pop3_ptr->capa.pipelining_parser = NULL;
             } else if(pipelining_state->type == STRING_CMP_NEQ) {
                 parser_reset(pop3_ptr->capa.pipelining_parser);
             }
