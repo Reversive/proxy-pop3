@@ -969,7 +969,6 @@ static int response_write(struct selector_key* key) {
         return pop3_ptr->current_return;
     }
 
-    // Hacer handling para que el proxy sepa que termino
     if(pop3_ptr->response.current_command == CMD_QUIT){
         return DONE;
     }
@@ -1283,7 +1282,7 @@ static int transform_write(struct selector_key * key) {
         buffer_write_adv(&pop3_ptr->transform.proxy_to_pipe, write_index);
     }
     
-    ptr = buffer_read_ptr(&pop3_ptr->transform.proxy_to_pipe, &max_size); // TODO ver de hacer un mejor manejo de estructuras
+    ptr = buffer_read_ptr(&pop3_ptr->transform.proxy_to_pipe, &max_size);
     ssize_t bytes_sent = write(pop3_ptr->transform.write_fd, ptr, max_size);
     if (bytes_sent < 0)
         return FAILURE;

@@ -42,10 +42,7 @@ int main(int argc, char* argv[]) {
     int sockfd;
     char buffer[DGRAM_SIZE];
 
-    // Creating socket file descriptor
-
     struct addrinfo * servaddr;
-    //socklen_t len = sizeof(servaddr);
     sockfd = udpClientSocket(client_config->admin_server_address, client_config->admin_server_port, &servaddr);
     if (sockfd == -1) {
         log(ERROR, "%s", "Error creating socket");

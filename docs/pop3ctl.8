@@ -21,7 +21,7 @@ pop3client \- client PMP que permite configurar y obtener distintas métricas de
 .TP
 .IR servidor-origen
 Dirección del servidor origen PMP. Puede ser una dirección IPV6 (por ejemplo
-\fI::1\fR) o una dirección IPV4 (por ejemplo \fI192.168.1.5\fR).
+\fI::1\fR), una dirección IPV4 (por ejemplo \fI192.168.1.5\fR) o un FQDN.
 
 
 .SH OPCIONES
@@ -44,22 +44,13 @@ Puerto UDP donde se encuentra el servidor PMP en el servidor admin.
 Por defecto el valor es \fI9090\fR.
 
 .IP "\fB\-t\fB \fItoken\fR"
-Token que se envía como autenticación al servidor admin. Debe tener, como mucho, 10 caracteres
+Token que se envía como autenticación al servidor admin. Debe tener 10 caracteres.
 
 .IP "\fB\-v\fB"
 Imprime información sobre la versión versión y termina.
 
 .SH EJEMPLOS
 
-.IP \(bu 4
-Se desea proxear sin ninguna transformación al servidor ubicado en
-\fIpop3.example.org\fR en el puerto estándar:
-.EXAMPLE "pop3filter pop3.example.org"
-
 .IP \(bu
 Se desea conectar al servidor admin que se encuentra en 127.0.0.1 (en este caso el puerto es el default 9090):
 .EXAMPLE "pop3ctl -t TOKEN 127.0.0.1"
-
-.IP \(bu
-Quitar todas las que comienzan con el texto \fIDate\fR ya sea en los headers como en el body:
-.EXAMPLE "pop3filter -t 'grep -i -v ^Date: ' pop3.example.org"
