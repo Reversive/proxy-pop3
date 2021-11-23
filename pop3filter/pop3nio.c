@@ -1426,13 +1426,7 @@ void pop3_passive_accept(struct selector_key* key) {
         goto fail;
     }
 
-    current_connections++;    
-    if(current_connections == MAX_CONNECTIONS && 
-        ((server_4 != -1 && selector_set_interest(key->s, server_4, OP_NOOP) != SELECTOR_SUCCESS) || 
-        (server_6 != -1 && selector_set_interest(key->s, server_6, OP_NOOP) != SELECTOR_SUCCESS)) ) {
-        
-        goto fail;
-    }
+    current_connections++;  
 
     return;
 
@@ -1441,7 +1435,7 @@ fail:
         close(client);
     }
     log(DEBUG, "%s", "Fail");
-    //pop3_destroy(state);
+    pop3_destroy(state);
 }
 
 static struct pop3* pop3_new(int client_fd) {
@@ -1539,12 +1533,6 @@ static void pop3_done(struct selector_key* key) {
 
     log(DEBUG, "%s", "Client disconnected");
     current_connections--;
-    if(current_connections == MAX_CONNECTIONS - 1) {
-        if ((server_4 != -1 && selector_set_interest(key->s, server_4, OP_READ) != SELECTOR_SUCCESS) || 
-            (server_6 != -1 && selector_set_interest(key->s, server_6, OP_READ) != SELECTOR_SUCCESS)) {
-            log(FATAL, "%s", "Unable to resuscribe to passive socket");
-        }
-    }
 
     reset_parsers(pop3_ptr);
     reset_queue(pop3_ptr->commands_left);
