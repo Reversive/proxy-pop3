@@ -13,7 +13,7 @@ CC=GCC
 ```
 2) Situarse en la raíz del proyecto
 ```
-cd /pdc-2021b-1
+cd /proxy-pop3
 ```
 3) Ejecutar:
 ```
@@ -21,8 +21,8 @@ make
 ```
 
 ## Ubicación de los artefactos generados
-- En la carpeta /pdc-2021b-1/pop3ctl se encontrará el archivo ejecutable del cliente con el nombre *pop3ctl.out*
-- En la carpeta /pdc-2021b-1/pop3filter se encontrará el archivo ejecutable del proxy POP3 con el nombre *pop3filter.out*
+- En la carpeta /proxy-pop3/pop3ctl se encontrará el archivo ejecutable del cliente con el nombre *pop3ctl.out*
+- En la carpeta /proxy-pop3/pop3filter se encontrará el archivo ejecutable del proxy POP3 con el nombre *pop3filter.out*
 
 ## Cómo ejecutar los artefactos generados
 - Tanto el proxy pop3filter como el cliente PMP se encuentran documentados dentro de la carpeta docs.
