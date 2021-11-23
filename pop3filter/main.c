@@ -10,7 +10,7 @@ int server_6 = -1;
 int admin_4 = -1;
 int admin_6 = -1;
 
-float client_timeout = 2.0;
+float client_timeout = 30.0;
 
 static void sigterm_handler(const int signal) {
     printf("signal %d, cleaning up and exiting\n", signal);

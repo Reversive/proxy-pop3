@@ -98,10 +98,8 @@ enum pop3_state {
        * Adds pipelining to CAPA origin response if needed
        * Interests:
        *      - OP_READ     over origin_fd
-       *      - OP_WRITE    over client_fd
        * Transitions:
-       *      - CAPA        while the message is not complete
-       *      - REQUEST     when the message is complete
+       *      - RESPONSE    after reading
        *      - FAILURE     if connection failed
        */
        CAPA,
@@ -113,7 +111,8 @@ enum pop3_state {
        *       - OP_WRITE   over origin_fd
        * Transitions:
        *       - REQUEST   while the request is not complete
-       *       - RESPONSE  when the request is complete
+       *       - CAPA      when the request is complete and the command is capa
+       *       - RESPONSE  when the request is complete otherwise
        *       - FAILURE   if there's any FAILURE
        */
        REQUEST,
@@ -124,27 +123,35 @@ enum pop3_state {
        *       - OP_READ over origin_fd
        *       - OP_WRITE over client_fd
        * Transitions:
-       *       - RESPONSE  while the response is not complete
-       *       - REQUEST   when the response is complete and transformation is not enabled
-       *       - TRANSFORM when the response is complete and transformation is enabled
-       *       - FAILURE     if there's any FAILURE
+       *       - REQUEST   when the response is complete
+       *       - TRANSFORM when response is not complete and transformation is disabled
+       *       - RESPONSE  when response is not complete and transformation is enabled
+       *       - FAILURE   if there's any FAILURE
        */
        RESPONSE,
 
        /*
        * Transforms an email with an external application
        * Interests:
-       *       -
+       *       - OP_READ over pipe read_fd
+       *       - OP_WRITE over pipe write_Fd
        * Transitions:
-       *       - TRANSFORM              while the transformation is not complete
+       *       - TRANSFORM              after writing to pipe if it found end or there is still something to be written
+       *       - RESPONSE               after writeing/reading otherwise
        *       - TRANSFORM_FAILURE      if the transform init fails
-       *       - REQUEST                when the origin response is not complete
-       *       - RESPONE                when the pipe receives bytes
        *       - FAILURE                if there's any FAILURE
        */
        TRANSFORM,
        TRANSFORM_FAILURE,
        DONE,
+
+       /*
+       * Transforms an email with an external application
+       * Interests:
+       *       - OP_WRITE over pipe client_fd
+       * Transitions:
+       *       - FAILURE
+       */
        FAILURE_WITH_MESSAGE,
        FAILURE
 };
@@ -639,11 +646,6 @@ static void hello_departure(struct selector_key *key) {
     pop3_ptr->checked_user = false;
     pop3_ptr->has_valid_user = false;
     pop3_ptr->may_have_args = false;
-
-    if(proxy_config->pop3_filter_command != NULL) {
-        buffer_init(&pop3_ptr->transform.proxy_to_pipe, BUFFER_SIZE, pop3_ptr->proxy_to_pipe_buffer);
-        buffer_init(&pop3_ptr->transform.pipe_to_proxy, BUFFER_SIZE, pop3_ptr->pipe_to_proxy_buffer);
-    }
 }
 
 static int hello_read(struct selector_key* key) {
@@ -1124,6 +1126,9 @@ static int transform_init(struct selector_key* key) {
     pop3_ptr->transform.is_done = false;
     pop3_ptr->transform.was_dot = false;
 
+    buffer_init(&pop3_ptr->transform.proxy_to_pipe, BUFFER_SIZE, pop3_ptr->proxy_to_pipe_buffer);
+    buffer_init(&pop3_ptr->transform.pipe_to_proxy, BUFFER_SIZE, pop3_ptr->pipe_to_proxy_buffer);
+
     const pid_t cmdpid = fork();
 
     if (cmdpid == -1) {
@@ -1434,7 +1439,7 @@ fail:
     if (client != -1) {
         close(client);
     }
-    log(DEBUG, "%s", "Fail");
+
     pop3_destroy(state);
 }
 
@@ -1469,6 +1474,7 @@ static struct pop3* pop3_new(int client_fd) {
 
     buffer_init(&pop3_ptr->client_to_origin, BUFFER_SIZE, pop3_ptr->read_buffer);
     buffer_init(&pop3_ptr->origin_to_client, BUFFER_SIZE, pop3_ptr->write_buffer);
+    
     pop3_ptr->references = 1;
 
     return pop3_ptr;
