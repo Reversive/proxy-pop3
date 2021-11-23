@@ -1462,6 +1462,9 @@ static struct pop3* pop3_new(int client_fd) {
     pop3_ptr->stm.states = handlers;
     pop3_ptr->capa.supports_pipelining = false;
     pop3_ptr->last_activity = time(NULL);
+    pop3_ptr->error_message.bytes_sent = 0;
+    pop3_ptr->error_message.message = NULL;
+    
     stm_init(&pop3_ptr->stm);
 
     buffer_init(&pop3_ptr->client_to_origin, BUFFER_SIZE, pop3_ptr->read_buffer);
