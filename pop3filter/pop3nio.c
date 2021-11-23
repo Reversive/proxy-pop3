@@ -1037,7 +1037,7 @@ static int capa_read(struct selector_key* key) {
             const struct parser_event* pipelining_state = parser_feed(pop3_ptr->capa.pipelining_parser, ptr[i]);
             if(pipelining_state->type == STRING_CMP_EQ) {
                 pop3_ptr->capa.supports_pipelining = true;
-                parser_destroy(&pop3_ptr->capa.pipelining_parser);
+                parser_destroy(pop3_ptr->capa.pipelining_parser);
                 pop3_ptr->capa.pipelining_parser = NULL;
             } else if(pipelining_state->type == STRING_CMP_NEQ) {
                 parser_reset(pop3_ptr->capa.pipelining_parser);
@@ -1546,6 +1546,9 @@ static void pop3_done(struct selector_key* key) {
         }
     }
 
+    reset_parsers(pop3_ptr);
+    reset_queue(pop3_ptr->commands_left);
+    
     for (unsigned i = 0; i < N(fds); i++) {
         if (fds[i] != -1) {
             if (selector_unregister_fd(key->s, fds[i]) != SELECTOR_SUCCESS) {
@@ -1554,9 +1557,6 @@ static void pop3_done(struct selector_key* key) {
             close(fds[i]);
         }
     }
-
-    reset_parsers(pop3_ptr);
-    reset_queue(pop3_ptr->commands_left);
 }
 
 static void pop3_destroy_(struct pop3* s) {
