@@ -11,13 +11,13 @@ compile:$(SOURCES)
 	$(CC) $(CFLAGS) -I./include -I../utils/include $(SOURCES)
 
 link:$(OBJECTS)
-	$(LINKER) $(LFLAGS) $(OBJECTS) ../utils/*.o -o $(BINARY).out
+	$(CC) $(LFLAGS) $(OBJECTS) ../utils/*.o -o $(BINARY).out
 
 utils:
 	cd ../utils; make all
 
 %.o: %.c
-	$(CC) $(GCCFLAGS) -I./include -I../utils/include -c $< -o $@
+	$(CC) $(CCFLAGS) -I./include -I../utils/include -c $< -o $@
 
 %.out : %.o
 	$(CC) $(LFLAGS) $< -o $@

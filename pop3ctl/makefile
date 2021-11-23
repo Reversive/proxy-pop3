@@ -17,7 +17,7 @@ utils:
 	cd ../utils; make all
 
 %.o: %.c
-	$(CC) $(GCCFLAGS) -I./include -I../utils/include -c $< -o $@
+	$(CC) $(CFLAGS) -I./include -I../utils/include -c $< -o $@
 
 %.out : %.o
 	$(CC) $(LFLAGS) $< -o $@

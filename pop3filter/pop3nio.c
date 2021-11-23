@@ -2,12 +2,20 @@
 // PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include <pop3nio.h>
 
-#define ATTACHMENT(key) ( (struct pop3 *)(key)->data)
-#define BUFFER_SIZE 1024
-#define COMMANDS 12
-#define R 0
-#define W 1
-#define END_STRING ".\r\n"
+#define ATTACHMENT(key)         ((struct pop3 *)(key)->data)
+#define BUFFER_SIZE             1024
+#define COMMANDS                12
+#define R                       0
+#define W                       1
+#define END_STRING              ".\r\n"
+#define CONNECTION_ERROR        "-ERR Connection refused\r\n"
+#define FQDN_ERROR              "-ERR Could not resolve origin\r\n"
+#define ORIGIN_READ_ERROR       "-ERR Error reading from origin\r\n"
+#define ORIGIN_WRITE_ERROR      "-ERR Error writing to client\r\n"
+#define CLIENT_WRITE_ERROR      "-ERR Error writing to origin\r\n"
+#define CLIENT_READ_ERROR       "-ERR Error reading from client\r\n"
+#define INTERNAL_ERROR          "-ERR Internal server errror\r\n"
+#define TIMEOUT_ERROR           "-ERR Disconnected for inactivity.\r\n"
 
 typedef struct parser* ptr_parser;
 
@@ -67,7 +75,7 @@ enum pop3_state {
     /*
      * Connects to origin server
      * Interests:
-     *      - None
+     *      - OP_WRITE  over origin_fd
      * Transitions:
      *      - HELLO     when the connection is established
      *      - FAILURE   if connection failed
@@ -77,6 +85,7 @@ enum pop3_state {
      /*
       * Reads the hello message from the origin server
       * Interests:
+      *      - OP_READ   over origin_fd
       *      - OP_WRITE  over client_fd
       * Transitions:
       *      - HELLO     while the message is not complete
@@ -88,19 +97,20 @@ enum pop3_state {
       /*
        * Adds pipelining to CAPA origin response if needed
        * Interests:
-       *      - OP_READ over origin_fd
+       *      - OP_READ     over origin_fd
+       *      - OP_WRITE    over client_fd
        * Transitions:
-       *      - CAPA      while the message is not complete
-       *      - REQUEST   when the message is complete
-       *      - FAILURE   if connection failed
+       *      - CAPA        while the message is not complete
+       *      - REQUEST     when the message is complete
+       *      - FAILURE     if connection failed
        */
        CAPA,
 
        /*
        * Reads requests from client and sends them to the origin server
        * Interests:
-       *       - OP_READ over client_fd
-       *       - OP_WRITE over origin_fd
+       *       - OP_READ    over client_fd
+       *       - OP_WRITE   over origin_fd
        * Transitions:
        *       - REQUEST   while the request is not complete
        *       - RESPONSE  when the request is complete
@@ -126,14 +136,16 @@ enum pop3_state {
        * Interests:
        *       -
        * Transitions:
-       *       - TRANSFORM     while the transformation is not complete
-       *       - REQUEST       when the transformation is complete
-       *       - FAILURE       if there's any FAILURE
+       *       - TRANSFORM              while the transformation is not complete
+       *       - TRANSFORM_FAILURE      if the transform init fails
+       *       - REQUEST                when the origin response is not complete
+       *       - RESPONE                when the pipe receives bytes
+       *       - FAILURE                if there's any FAILURE
        */
        TRANSFORM,
        TRANSFORM_FAILURE,
        DONE,
-       FAILURE_WITH_MESSAGE, // TODO chequeo de estas funciones
+       FAILURE_WITH_MESSAGE,
        FAILURE
 };
 
@@ -471,6 +483,9 @@ static int connect_to_origin_by_ip(struct selector_key *key, int family, void *s
         }
     }
 ip_connect_fail:
+    pop3_ptr->error_message.message = CONNECTION_ERROR;
+    pop3_ptr->error_message.length = strlen(pop3_ptr->error_message.message);
+
     log(ERROR, "Client %s could not connect to origin %s:%hu",
         sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address),
         proxy_config->origin_server_address, proxy_config->origin_server_port);
@@ -481,6 +496,7 @@ ip_connect_fail:
 }
 
 static int resolve_origin(struct selector_key* key) {
+    struct pop3* pop3_ptr = ATTACHMENT(key);
     if(is_ipv4(proxy_config->origin_server_address)) {
         struct sockaddr_in servaddr;
         servaddr.sin_family = AF_INET;
@@ -502,7 +518,13 @@ static int resolve_origin(struct selector_key* key) {
         
     memcpy(k, key, sizeof(*k));
     if (pthread_create(&tid, 0, blocking_resolve_origin, k) == -1 || selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS){
-        return FAILURE_WITH_MESSAGE; // TODO mensaje para el cliente
+        char buff[SOCKADDR_TO_HUMAN_MIN];
+        log(ERROR, "Client %s could not resolve FQDN %s", sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address),
+            proxy_config->origin_server_address);
+
+        pop3_ptr->error_message.message = FQDN_ERROR;
+        pop3_ptr->error_message.length = strlen(pop3_ptr->error_message.message);
+        return FAILURE_WITH_MESSAGE;
     }
     return RESOLVE_ORIGIN;
 }
@@ -536,7 +558,8 @@ connect_fail:
     
     if(sock == -1) {
         freeaddrinfo(pop3_ptr->origin_resolution);
-        pop3_ptr->error_message.message = "-ERR Connection refused.\r\n";
+        pop3_ptr->error_message.message = CONNECTION_ERROR;
+        pop3_ptr->error_message.length = strlen(CONNECTION_ERROR);
     
         char buff[SOCKADDR_TO_HUMAN_MIN];
         log(ERROR, "Client %s could not connect to origin %s:%hu",
@@ -561,7 +584,7 @@ static int connection(struct selector_key* key) {
     int error = 0;
     socklen_t len = sizeof(error);
 
-    char buff[SOCKADDR_TO_HUMAN_MIN]; // TODO podria ser una funcion print_connection
+    char buff[SOCKADDR_TO_HUMAN_MIN];
 
     if (getsockopt(key->fd, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
         if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS)
@@ -571,7 +594,8 @@ static int connection(struct selector_key* key) {
             pop3_ptr->current_res = pop3_ptr->current_res->ai_next;
 
         if(pop3_ptr->current_res == NULL) {
-            pop3_ptr->error_message.message = "-ERR Connection refused.\r\n";
+            pop3_ptr->error_message.message = CONNECTION_ERROR;
+            pop3_ptr->error_message.length = strlen(CONNECTION_ERROR);
 
             log(ERROR, "Client %s could not connect to origin %s:%hu",
                 sockaddr_to_human(buff, SOCKADDR_TO_HUMAN_MIN, (struct sockaddr *) &pop3_ptr->client_address),
@@ -629,7 +653,9 @@ static int hello_read(struct selector_key* key) {
     uint8_t* ptr = buffer_write_ptr(&pop3_ptr->origin_to_client, &max_size);
     ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
     if (read_chars <= 0) { 
-        pop3_ptr->error_message.message = "Error reading from origin";
+        pop3_ptr->error_message.message = ORIGIN_READ_ERROR;
+        pop3_ptr->error_message.length = strlen(pop3_ptr->error_message.message);
+        
         if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
@@ -659,7 +685,8 @@ static int hello_write(struct selector_key* key) {
 
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, MSG_NOSIGNAL)) == -1) {
-        pop3_ptr->error_message.message = "Error writing from origin";
+        pop3_ptr->error_message.message = ORIGIN_WRITE_ERROR;
+        pop3_ptr->error_message.length = strlen(ORIGIN_WRITE_ERROR);
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
@@ -689,7 +716,8 @@ static int request_read(struct selector_key* key) {
     ssize_t read_chars = recv(pop3_ptr->client_fd, ptr, max_size, 0);
 
     if (read_chars < 0) {
-        pop3_ptr->error_message.message = "Error reading from client";
+        pop3_ptr->error_message.message = ORIGIN_READ_ERROR;
+        pop3_ptr->error_message.length = strlen(ORIGIN_READ_ERROR);
         if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
@@ -710,7 +738,8 @@ static int request_read(struct selector_key* key) {
             command_node node = calloc(1, sizeof(t_node));
 
             if(node == NULL) {
-                pop3_ptr->error_message.message = "-ERR Error allocating memory";//TODO otro mensaje
+                pop3_ptr->error_message.message = INTERNAL_ERROR;
+                pop3_ptr->error_message.length = strlen(INTERNAL_ERROR);
                 if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
                     return FAILURE;
                 
@@ -791,7 +820,8 @@ static int request_write(struct selector_key* key){
 
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, node->command_len, MSG_NOSIGNAL)) == -1) {
-        pop3_ptr->error_message.message = "Error writing to origin"; // TODO cambiar estos por un #DEFINE
+        pop3_ptr->error_message.message = CLIENT_WRITE_ERROR;
+        pop3_ptr->error_message.length = strlen(CLIENT_WRITE_ERROR);
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
@@ -832,7 +862,8 @@ static int response_read(struct selector_key* key) {
     ssize_t read_chars = recv(pop3_ptr->origin_fd, ptr, max_size, 0);
 
     if (read_chars <= 0) {
-        pop3_ptr->error_message.message = "Error reading from origin";
+        pop3_ptr->error_message.message = ORIGIN_READ_ERROR;
+        pop3_ptr->error_message.length = strlen(ORIGIN_READ_ERROR);
         if (selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
         
@@ -908,7 +939,8 @@ static int response_write(struct selector_key* key) {
     uint8_t* ptr = buffer_read_ptr(pop3_ptr->response.write_buffer, &max_size);
     ssize_t sent_bytes;
     if( (sent_bytes = send(key->fd, ptr, max_size, MSG_NOSIGNAL)) == -1) {
-        pop3_ptr->error_message.message = "Error writing to client";
+        pop3_ptr->error_message.message = ORIGIN_WRITE_ERROR;
+        pop3_ptr->error_message.length = strlen(ORIGIN_WRITE_ERROR);
 
         if (selector_set_interest_key(key, OP_WRITE) != SELECTOR_SUCCESS)
             return FAILURE;
@@ -1454,7 +1486,8 @@ static void pop3_timeout(struct selector_key* key) {
     struct pop3 *pop3_ptr = ATTACHMENT(key);
     if(pop3_ptr != NULL && difftime(time(NULL), pop3_ptr->last_activity) >= client_timeout) {
         log(INFO, "%s", "Disconnecting client for inactivity");
-        pop3_ptr->error_message.message = "-ERR Disconnected for inactivity.\r\n";
+        pop3_ptr->error_message.message = TIMEOUT_ERROR;
+        pop3_ptr->error_message.length = strlen(TIMEOUT_ERROR);
         if(selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)
             pop3_done(key);
 
