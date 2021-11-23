@@ -3,6 +3,11 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+/** queue.c implementa una cola que contiene los comandos parseados 
+ *  que se escriben al origin server.
+ *  Cada nodo es un comando
+*/
+
 typedef struct t_node {
     int command;
     uint8_t command_len;

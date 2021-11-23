@@ -32,8 +32,9 @@ int main(int argc, char* argv[]) {
         printf("Token is mandatory. Try using -t token\n");
         return -1;
     }
-    if(strlen(client_config->admin_token)>10){
-        printf("Token must have 10 or less characters\n");
+
+    if(strlen(client_config->admin_token) != 10){
+        printf("Token must have exactly 10 characters\n");
         return -1;
     }
 

@@ -101,6 +101,7 @@ enum pop3_state {
        * Transitions:
        *      - RESPONSE    after reading
        *      - FAILURE     if connection failed
+       *      - CAPA        if the response is not done
        */
        CAPA,
 
@@ -124,8 +125,8 @@ enum pop3_state {
        *       - OP_WRITE over client_fd
        * Transitions:
        *       - REQUEST   when the response is complete
-       *       - TRANSFORM when response is not complete and transformation is disabled
-       *       - RESPONSE  when response is not complete and transformation is enabled
+       *       - TRANSFORM when response is not complete and transformation is enabled
+       *       - RESPONSE  when response is not complete and transformation is disabled
        *       - FAILURE   if there's any FAILURE
        */
        RESPONSE,
@@ -142,16 +143,17 @@ enum pop3_state {
        *       - FAILURE                if there's any FAILURE
        */
        TRANSFORM,
-       TRANSFORM_FAILURE,
-       DONE,
 
        /*
-       * Transforms an email with an external application
+       * Flushes email if transform init failed
        * Interests:
-       *       - OP_WRITE over pipe client_fd
+       *       - OP_WRITE over client_fd
        * Transitions:
-       *       - FAILURE
+       *       - RESPONSE               
+       *       - FAILURE                if there's any FAILURE
        */
+       TRANSFORM_FAILURE,
+       DONE,
        FAILURE_WITH_MESSAGE,
        FAILURE
 };

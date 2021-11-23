@@ -3,7 +3,7 @@
 #include <pop3admin.h>
 
 static bool cmp_str(uint8_t * str1, uint8_t * str2, uint8_t size);
-static enum response_stats admin_parse_request(t_admin_req * request, uint8_t * buffer, size_t buff_len);
+static enum response_status admin_parse_request(t_admin_req * request, uint8_t * buffer, size_t buff_len);
 
 static void send_admin_resp(int fd, uint8_t status, char * message, struct sockaddr_storage client_addr, size_t client_addr_len);
 static void stats_handler(int fd, int request_len, struct t_admin_req * request, struct sockaddr_storage client_addr, size_t client_addr_len);
@@ -39,7 +39,7 @@ void admin_parse(struct selector_key* key) {
     }
 
     t_admin_req request;
-    enum response_stats status = admin_parse_request(&request, buffer, read_chars);
+    enum response_status status = admin_parse_request(&request, buffer, read_chars);
 
     if (status != OK) {
         send_admin_resp(key->fd, status, failure_messages[status-1], client_address, len);
@@ -57,7 +57,7 @@ void admin_destroy() {
         free(proxy_config->error_file_path);
 }
 
-static enum response_stats admin_parse_request(t_admin_req * request, uint8_t * buffer, size_t buff_len) {
+static enum response_status admin_parse_request(t_admin_req * request, uint8_t * buffer, size_t buff_len) {
     if (buff_len < HEADER_SIZE + ADMIN_LINE_END_LEN)
         return INVALID_ARGS;
     

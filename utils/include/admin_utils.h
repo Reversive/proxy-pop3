@@ -41,7 +41,7 @@ enum admin_commands {
     SET_ERROR_FILE
 };
 
-enum response_stats {
+enum response_status {
     OK = 0,
     UNSOPPORTED_COMMAND,
     UNSUPPORTED_VERSION,

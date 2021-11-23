@@ -129,7 +129,7 @@ int main(int argc, char *argv[]) {
     sa.sa_handler = SIG_DFL; //handle signal by ignoring
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_NOCLDWAIT;
-    if (sigaction(SIGCHLD, &sa, 0) == -1) {
+    if (sigaction(SIGCHLD, &sa, 0) == -1) { //para ignorar la señal al terminar el proceso hijo del transform
         perror(0);
         error_message = "Failed to execute sigignore";
         goto finally;
