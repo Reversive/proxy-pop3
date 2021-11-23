@@ -25,7 +25,7 @@
 #include <queue.h>
 #include <pop3admin.h>
 
-#define MAX_CONNECTIONS 3
+#define MAX_CONNECTIONS 250
 #define N(x) (sizeof(x)/sizeof((x)[0]))
 
 void pop3_passive_accept(struct selector_key *key);

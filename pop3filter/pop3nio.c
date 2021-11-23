@@ -962,7 +962,6 @@ static int response_write(struct selector_key* key) {
                 selector_set_interest(key->s, pop3_ptr->response.write_fd, OP_WRITE) != SELECTOR_SUCCESS))
             return FAILURE;
         
-        //TODO arreglar esto para caso NO TRANSFORM
         return pop3_ptr->current_return;
     }
 
@@ -1311,7 +1310,7 @@ static int transform_read(struct selector_key * key) {
     uint8_t * ptr;
     if (!pop3_ptr->transform.started_reading) {
         ptr = buffer_write_ptr(pop3_ptr->response.write_buffer, &max_size);
-        char *response = "+OK \r\n"; // TODO mandar rta real y pasarlo a #DEFINE
+        char *response = "+OK \r\n";
         memcpy(ptr, response, strlen(response));
         buffer_write_adv(pop3_ptr->response.write_buffer, strlen(response));
         pop3_ptr->transform.started_reading = true;
@@ -1319,7 +1318,7 @@ static int transform_read(struct selector_key * key) {
     }
 
     ptr = buffer_write_ptr(pop3_ptr->response.write_buffer, &max_size);
-    if (max_size <= 1) { // TODO CHEQUEAR ESTO
+    if (max_size <= 1) {
         if (selector_set_interest_key(key, OP_NOOP) != SELECTOR_SUCCESS || 
             (pop3_ptr->transform.write_fd != -1 && selector_set_interest(key->s, pop3_ptr->transform.write_fd, OP_NOOP) != SELECTOR_SUCCESS) ||
             selector_set_interest(key->s, pop3_ptr->client_fd, OP_WRITE) != SELECTOR_SUCCESS)

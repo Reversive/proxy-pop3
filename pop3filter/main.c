@@ -37,12 +37,12 @@ int main(int argc, char *argv[]) {
     }
 
     if(server_4 == -1 && server_6 == -1)
-        goto finally; //TODO que pasa si tenia que escuchar en las dos si o si?
+        goto finally;
 
     log(INFO, "Listening on TCP port %d", proxy_config->pop3_listen_port);
     
     if(proxy_config->admin_listen_address == NULL){
-        admin_4 = setup_server_socket("127.0.0.1", proxy_config->admin_listen_port, IPPROTO_UDP, true); //TODO pasarlos a define
+        admin_4 = setup_server_socket("127.0.0.1", proxy_config->admin_listen_port, IPPROTO_UDP, true);
         admin_6 = setup_server_socket("::1", proxy_config->admin_listen_port, IPPROTO_UDP, false);
     } else if (is_ipv6(proxy_config->admin_listen_address)){
         admin_6 = setup_server_socket(proxy_config->admin_listen_address, proxy_config->admin_listen_port, IPPROTO_UDP, false);
@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
     }
 
     if(admin_4 == -1 && admin_6 == -1)
-        goto finally; //TODO que pasa si tenia que escuchar en las dos si o si?
+        goto finally;
 
     init_parser_defs();
 
